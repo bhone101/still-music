@@ -13,7 +13,7 @@ ROOT_FILES = {
 }
 SOURCE_DIRS = {".github", "Docs", "Resources", "Sources", "Tests", "Vendor"}
 SCRIPTS = {
-    "build-app.sh", "build-taglib.sh", "check.sh", "make-icon.swift",
+    "build-app.sh", "build-taglib.sh", "build-dmg.sh", "check.sh", "make-icon.swift",
     "package-source.sh", "package-source.py",
 }
 PRIVATE_SUFFIXES = {".p12", ".pfx", ".key", ".pem", ".jks", ".keystore", ".mobileprovision"}

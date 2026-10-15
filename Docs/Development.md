@@ -48,6 +48,10 @@ The source packager requires Python 3.9 or later and works before the first comm
 
 ## Before distributing binaries
 
+Run `bash scripts/build-dmg.sh` to build an app and a compressed disk image for the host architecture. It includes an Applications shortcut and installation instructions, verifies the app signature and disk image, and writes a SHA-256 checksum beside the DMG. CI runs this on Apple silicon and Intel and retains the packages as workflow artifacts for 14 days.
+
+To publish a version, wait for both jobs on the intended commit to pass, download their DMG/checksum artifacts, verify the checksums, and attach both architectures to a GitHub Release targeting that exact commit. Include the corresponding source archive and license notices. Mark preview releases as prereleases. Update the README download links when changing versions; publishing source changes alone does not replace the release assets. If a release is defective, remove its download links and withdraw the affected assets until a fixed version passes verification.
+
 - Retest local playback, queues, sleep/wake, output-device changes and lyrics following.
 - Exercise lyric/cover write and delete paths on disposable copies, including failures; compare audio payloads and other tags.
 - Check keyboard navigation, VoiceOver, theme contrast and narrow layouts.

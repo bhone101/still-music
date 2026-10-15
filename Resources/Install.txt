@@ -1,0 +1,23 @@
+Still Music for macOS
+
+Requires macOS 14 or later.
+
+1. Drag Still Music.app onto the Applications shortcut.
+2. Eject this disk image.
+3. Open Still Music from Applications.
+
+This is an early preview. It is ad-hoc signed, but not Developer ID signed
+or notarized by Apple. macOS may block the first launch.
+
+If you downloaded it from the official repository and trust this build,
+try opening it once, then use System Settings > Privacy & Security >
+Open Anyway. Do not disable Gatekeeper or other system protections.
+Apple's guidance: https://support.apple.com/en-us/102445
+
+Official downloads: https://github.com/bhone101/still-music/releases
+Source and license: https://github.com/bhone101/still-music
+
+Choose arm64 for Apple silicon (M-series) or x86_64 for an Intel Mac.
+Apple menu > About This Mac shows your chip or processor.
+
+Keep backups of music before using metadata write/delete actions.

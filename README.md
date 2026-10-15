@@ -6,6 +6,17 @@ A small native music player for your own files, built with SwiftUI and AVFoundat
 
 **Early preview.** This repository publishes the macOS app. It is not a stable 1.0 release, and downloadable builds are not Developer ID signed or notarized.
 
+## Download for Mac
+
+[![Download for Apple silicon](https://img.shields.io/badge/Download_DMG-Apple_silicon-4775B5?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/bhone101/still-music/releases/download/v0.1.0/Still-Music-0.1.0-arm64.dmg)
+[![Download for Intel](https://img.shields.io/badge/Download_DMG-Intel_Mac-555555?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/bhone101/still-music/releases/download/v0.1.0/Still-Music-0.1.0-x86_64.dmg)
+
+Requires **macOS 14 or later**. Choose Apple silicon for an M-series Mac, or Intel for an Intel Mac; check **Apple menu → About This Mac** if unsure. [Release notes and checksums](https://github.com/bhone101/still-music/releases/tag/v0.1.0).
+
+Open the DMG, drag **Still Music** into **Applications**, then eject the disk image and open the app from Applications.
+
+These preview builds are ad-hoc signed but **not Apple-notarized**, so macOS may block the first launch. If you trust the download, try opening it once, then use **System Settings → Privacy & Security → Open Anyway**. Follow [Apple's instructions](https://support.apple.com/en-us/102445); do not disable system security protections.
+
 ## What it does
 
 - Plays local FLAC, ALAC, WAV, AIFF, MP3, AAC and CAF through macOS decoders.

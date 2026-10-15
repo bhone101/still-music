@@ -28,7 +28,19 @@ jobs:
         run: bash scripts/check.sh
       - name: Build and verify signed app
         run: bash scripts/build-app.sh
+      - name: Build and verify disk image
+        run: bash scripts/build-dmg.sh --skip-build
       - name: Verify source packaging
         run: bash scripts/package-source.sh
       - name: Ensure builds leave source unchanged
         run: git diff --exit-code
+      - name: Upload verified disk image
+        uses: actions/upload-artifact@v7
+        with:
+          name: Still-Music-${{ runner.arch }}
+          path: |
+            build/Still-Music-*.dmg
+            build/Still-Music-*.dmg.sha256
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
