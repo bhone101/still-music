@@ -1,0 +1,34 @@
+# Build products and local tools
+.build/
+build/
+.swiftpm/
+.DS_Store
+.android-tools/
+
+# Android stays local until its separate release is ready.
+/android/
+/scripts/build-android.sh
+/scripts/build-android-optimized.sh
+/scripts/generate-alac-fixtures.py
+/scripts/generate-audio-fixtures.py
+
+# Local planning, renders and editor files
+/tmp/
+/tasks.txt
+.idea/
+.vscode/
+*.swp
+*.xcuserstate
+xcuserdata/
+
+# Credentials and signing material
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.key
+*.pem
+*.jks
+*.keystore
+*.mobileprovision
