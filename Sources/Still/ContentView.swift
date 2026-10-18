@@ -198,7 +198,13 @@ struct ContentView: View {
                     Button("Add songs") { playlistSongs = playlist }
                     Button("Play") { if let first = model.visibleTracks.first { model.play(first) } }.disabled(model.visibleTracks.isEmpty)
                     Menu { playlistActions(playlist) } label: { Image(systemName: "ellipsis") }.menuIndicator(.hidden).fixedSize()
-                } else { sortMenu }
+                } else {
+                    if model.section == .favorites {
+                        Button("Play") { if let first = model.visibleTracks.first { model.play(first) } }
+                            .disabled(model.visibleTracks.isEmpty)
+                    }
+                    sortMenu
+                }
             }.padding(.bottom, 18)
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(Palette.muted)

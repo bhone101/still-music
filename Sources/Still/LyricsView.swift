@@ -5,26 +5,24 @@ private typealias LyricsState<Value> = SwiftUI.State<Value>
 
 struct LyricsView: View {
     @ObservedObject var model: PlayerModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @LyricsState private var following = true
     private var currentLine: Int? { model.lyrics.currentLine(at: model.position) }
 
     private var lyricsHeader: some View {
-        LyricsActionsLayout() {
+        Menu {
             Button { model.findCurrentLyricsOnline() } label: {
                 Label("Find online", systemImage: "magnifyingglass")
-                    .padding(.horizontal, 10).frame(height: 36).contentShape(Rectangle())
             }
             .disabled(model.current == nil || model.loadingLyrics || model.savingLyrics || model.uploadingLyrics)
             .help("Search LRCLIB using this song’s title and artist")
             Button { model.uploadLyrics() } label: {
                 Label("Import lyrics", systemImage: "square.and.arrow.up")
-                    .padding(.horizontal, 10).frame(height: 36).contentShape(Rectangle())
             }
             .disabled(model.current == nil || model.uploadingLyrics || model.savingLyrics)
             .help("Choose a local .lrc or .txt file for this song")
             Button { model.writeLyricsToFile() } label: {
                 Label("Write lyrics to file", systemImage: "square.and.arrow.down")
-                    .padding(.horizontal, 10).frame(height: 36).contentShape(Rectangle())
             }
             .disabled(!model.canWriteEmbeddedLyrics || model.lyrics.isEmpty || model.savingLyrics || model.loadingLyrics || model.uploadingLyrics || model.savingCover)
             .help("Replace embedded lyrics in this FLAC, MP3 or M4A file")
@@ -34,19 +32,23 @@ struct LyricsView: View {
             } label: {
                 Label(model.hasUnsavedLyrics ? "Discard changes" : "Delete lyrics",
                       systemImage: model.hasUnsavedLyrics ? "arrow.uturn.backward" : "trash")
-                    .padding(.horizontal, 10).frame(height: 36).contentShape(Rectangle())
             }
             .disabled(model.loadingLyrics || model.savingLyrics || model.uploadingLyrics ||
                       (!model.hasUnsavedLyrics && (!model.canWriteEmbeddedLyrics || !model.canDeleteLyrics || model.savingCover)))
             .help(model.hasUnsavedLyrics
                   ? "Remove the app draft without changing the audio or sidecar files"
                   : "Remove embedded lyrics and clear this song’s lyrics in Still Music")
-        }.font(.system(size: 14)).buttonStyle(.plain)
-            .labelStyle(.titleAndIcon)
-            .textSelection(.disabled)
-            .onContinuousHover { phase in
-                if case .active = phase { NSCursor.arrow.set() }
-            }
+        } label: {
+            Text("Lyrics actions")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.visible)
+        .controlSize(.small)
+        .font(.system(size: 13))
+        .labelStyle(.titleAndIcon)
+        .fixedSize(horizontal: true, vertical: false)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .help("Find, import, write or remove lyrics for this song")
     }
 
     var body: some View {
@@ -61,21 +63,25 @@ struct LyricsView: View {
             } else if model.lyrics.isEmpty {
                 Text("No lyrics found").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if model.lyrics.lines.isEmpty {
-                ScrollView { Text(model.lyrics.plainText).font(.system(size: 28)).lineSpacing(10).multilineTextAlignment(.leading).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+                ScrollView { Text(model.lyrics.plainText).font(.system(size: 28)).lineSpacing(10).multilineTextAlignment(.center).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .center) }
             } else {
                 ScrollViewReader { proxy in
                     GeometryReader { geometry in
                         ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 28) {
+                            LazyVStack(alignment: .center, spacing: 28) {
                                 ForEach(model.lyrics.lines.indices, id: \.self) { index in
                                     let line = model.lyrics.lines[index]
                                     Button { model.seek(to: line.time); following = true } label: {
                                         Text(line.text.isEmpty ? " " : line.text)
-                                            .font(.system(size: index == currentLine ? 40 : 28, weight: index == currentLine ? .bold : .medium))
-                                            .multilineTextAlignment(.leading)
+                                            // Keep wrapping and row heights stable as the highlighted line changes.
+                                            .font(.system(size: 34, weight: .semibold))
+                                            .multilineTextAlignment(.center)
                                             .lineSpacing(8)
                                             .foregroundStyle(index == currentLine ? Color.primary : Color.secondary.opacity(0.65))
-                                            .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                                            .frame(maxWidth: .infinity, alignment: .center)
+                                            .scaleEffect(index == currentLine || reduceMotion ? 1 : 0.94)
+                                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: index == currentLine)
+                                            .contentShape(Rectangle())
                                     }.buttonStyle(.plain).id(index)
                                 }
                             }.padding(.vertical, geometry.size.height / 2)
@@ -83,10 +89,18 @@ struct LyricsView: View {
                         .background(LyricsScrollObserver { following = false })
                         .simultaneousGesture(DragGesture(minimumDistance: 3).onChanged { _ in following = false })
                         .onChange(of: currentLine) { _, index in
-                            if following, let index { withAnimation { proxy.scrollTo(index, anchor: .center) } }
+                            if following, let index {
+                                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.45)) {
+                                    proxy.scrollTo(index, anchor: .center)
+                                }
+                            }
                         }
                         .onChange(of: following) { _, value in
-                            if value, let currentLine { withAnimation { proxy.scrollTo(currentLine, anchor: .center) } }
+                            if value, let currentLine {
+                                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.45)) {
+                                    proxy.scrollTo(currentLine, anchor: .center)
+                                }
+                            }
                         }
                         .onAppear { if let currentLine { proxy.scrollTo(currentLine, anchor: .center) } }
                     }
@@ -94,8 +108,7 @@ struct LyricsView: View {
                 HStack {
                     if !following { Button("Resume following") { following = true } }
                     Spacer()
-
-                }
+                }.frame(height: 28)
             }
         }.padding(.top, 8).frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay(alignment: .bottom) {
@@ -136,46 +149,5 @@ private struct LyricsScrollObserver: NSViewRepresentable {
             }
         }
         deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
-    }
-}
-
-/// Keep action names visible at every width, wrapping whole buttons when needed.
-private struct LyricsActionsLayout: Layout {
-    private let horizontalSpacing: CGFloat = 12
-    private let verticalSpacing: CGFloat = 4
-
-    private func arrangement(width: CGFloat?, subviews: Subviews) -> (size: CGSize, origins: [CGPoint]) {
-        let finiteWidth = width.flatMap { $0.isFinite ? max(0, $0) : nil }
-        let availableWidth = finiteWidth ?? .infinity
-        var origins: [CGPoint] = []
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var rowHeight: CGFloat = 0
-        var contentWidth: CGFloat = 0
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x > 0 && x + size.width > availableWidth {
-                x = 0
-                y += rowHeight + verticalSpacing
-                rowHeight = 0
-            }
-            origins.append(CGPoint(x: x, y: y))
-            contentWidth = max(contentWidth, x + size.width)
-            x += size.width + horizontalSpacing
-            rowHeight = max(rowHeight, size.height)
-        }
-        return (CGSize(width: finiteWidth ?? contentWidth, height: y + rowHeight), origins)
-    }
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        arrangement(width: proposal.width, subviews: subviews).size
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let positions = arrangement(width: bounds.width, subviews: subviews).origins
-        for (index, subview) in subviews.enumerated() {
-            subview.place(at: CGPoint(x: bounds.minX + positions[index].x, y: bounds.minY + positions[index].y),
-                          anchor: .topLeading, proposal: .unspecified)
-        }
     }
 }
