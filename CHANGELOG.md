@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased — macOS open-source preview
+## 0.1.1 — 2026-10-18
+
+- Add a Play button to Favorites, matching other playlists.
+- Keep lyrics actions in a compact menu at the top left of the lyrics panel.
+- Center lyrics within their panel and smooth synced-line transitions.
+- Respect Reduce Motion when following synced lyrics.
+
+## 0.1.0 — macOS open-source preview
 
 - Native local playback, library browsing, favorites, saved playlists and queue controls.
 - Plain/synced local lyrics, optional online lookup and explicit embedded lyrics editing.
@@ -9,4 +16,4 @@
 - Lyrics action buttons retain text and wrap at narrow widths.
 - MIT license for original code, dependency notices, contributor documentation and macOS CI.
 
-Version 0.1.0 remains a development identifier, not a claim that a stable or notarized release has been published.
+These releases are early previews. The downloadable apps are ad-hoc signed and are not Developer ID signed or notarized.

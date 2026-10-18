@@ -34,7 +34,7 @@ public actor OnlineMetadata {
         try Task.checkCancellation()
         nextRequest = Date().addingTimeInterval(1.1)
         var request = URLRequest(url: url)
-        request.setValue("StillMusic/0.1.0 (native macOS music player)", forHTTPHeaderField: "User-Agent")
+        request.setValue("StillMusic/0.1.1 (native macOS music player)", forHTTPHeaderField: "User-Agent")
         return try await fetch(request, limit)
     }
     public static func normalized(_ text: String) -> String {
