@@ -10,6 +10,7 @@ build/
 /scripts/build-android-optimized.sh
 /scripts/generate-alac-fixtures.py
 /scripts/generate-audio-fixtures.py
+/android music.rtf
 
 # Local planning, renders and editor files
 /tmp/

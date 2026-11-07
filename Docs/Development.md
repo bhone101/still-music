@@ -46,7 +46,7 @@ GitHub Actions builds and runs checks on Apple silicon and Intel macOS runners. 
 3. Create the repository and push only after reviewing the contents. Enable private vulnerability reporting under repository Settings → Security.
 4. Wait for both CI jobs to pass. Record any known platform limitations in the release notes.
 
-The source packager requires Python 3.9 or later and works before the first commit, using Git's tracked/non-ignored file inventory. It rejects Android paths, build caches, common credential filenames and unexpected top-level files even if accidentally force-added. It creates a macOS-only source archive and a file manifest under `build/`. This filename check is not a substitute for reviewing file contents for secrets.
+The source packager requires Python 3.9 or later and uses Git's tracked/non-ignored file inventory. It deliberately omits Android source and build tools because this archive is macOS-only, and rejects build caches, common credential filenames and unexpected top-level files even if accidentally force-added. It creates a source archive and a file manifest under `build/`. This filename check is not a substitute for reviewing file contents for secrets.
 
 ## Before distributing binaries
 

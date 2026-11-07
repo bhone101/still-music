@@ -26,9 +26,17 @@ def main():
         cwd=ROOT, check=True, stdout=subprocess.PIPE,
     )
     names = sorted(set(result.stdout.decode("utf-8").rstrip("\0").split("\0")))
+    names = [
+        name for name in names
+        if Path(name).parts[0] != "android"
+        and name not in {"scripts/build-android.sh", "scripts/profile-android.sh"}
+    ]
     rejected = []
     for name in names:
         path = Path(name)
+        # This archive is intentionally macOS-only; the repository also tracks Android.
+        if path.parts[0] == "android" or name in {"scripts/build-android.sh", "scripts/profile-android.sh"}:
+            continue
         allowed = name in ROOT_FILES or path.parts[0] in SOURCE_DIRS
         allowed |= len(path.parts) == 2 and path.parts[0] == "scripts" and path.name in SCRIPTS
         private = path.suffix.lower() in PRIVATE_SUFFIXES or path.name.startswith(".env")

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 — unreleased
+## 0.2.0 — macOS preview (2026-11-07)
 
 - Add per-song permanent audio-file deletion with a warning showing the full path; retain the library entry if deletion fails.
 

@@ -4,18 +4,23 @@ A small native music player for your own files, built with SwiftUI and AVFoundat
 
 <img src="Resources/AppIcon.png" alt="Still Music: a blue ring with a white center dot" width="128">
 
-**Early preview.** This repository contains the macOS and Android app source. The macOS download links below are older preview builds; Android is available as source and is not a Google Play release. Neither app is a stable 1.0 release.
+**Early preview.** This repository contains the macOS and Android app source. These downloads are preview builds, not stable 1.0 releases. The macOS package is for Apple silicon only; Android is not a Google Play release.
 
 ## Download for Mac
 
-[![Download for Apple silicon](https://img.shields.io/badge/Download_DMG-Apple_silicon-4775B5?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/bhone101/still-music/releases/download/v0.1.1/Still-Music-0.1.1-arm64.dmg)
-[![Download for Intel](https://img.shields.io/badge/Download_DMG-Intel_Mac-555555?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/bhone101/still-music/releases/download/v0.1.1/Still-Music-0.1.1-x86_64.dmg)
+[![Download for Apple silicon](https://img.shields.io/badge/Download_DMG-Apple_silicon-4775B5?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/bhone101/still-music/releases/download/v0.2.0/Still-Music-0.2.0-arm64.dmg)
 
-Requires **macOS 14 or later**. Choose Apple silicon for an M-series Mac, or Intel for an Intel Mac; check **Apple menu → About This Mac** if unsure. [Release notes and checksums](https://github.com/bhone101/still-music/releases/tag/v0.1.1).
+Requires **macOS 14 or later** on an Apple silicon Mac. An Intel package is not included in this preview. [Release notes and checksums](https://github.com/bhone101/still-music/releases/tag/v0.2.0).
 
 Open the DMG, drag **Still Music** into **Applications**, then eject the disk image and open the app from Applications.
 
 These preview builds are ad-hoc signed but **not Apple-notarized**, so macOS may block the first launch. If you trust the download, try opening it once, then use **System Settings → Privacy & Security → Open Anyway**. Follow [Apple's instructions](https://support.apple.com/en-us/102445); do not disable system security protections.
+
+## Download for Android
+
+[![Download Android preview](https://img.shields.io/badge/Download-Android_preview-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/bhone101/still-music/releases/download/v0.2.0/Still-Music-0.8.0-preview.apk)
+
+Requires **Android 9 or later**. This preview APK is signed with a development key and is not a Google Play release. See [Android build and installation notes](android/README.md).
 
 ## What it does
 
