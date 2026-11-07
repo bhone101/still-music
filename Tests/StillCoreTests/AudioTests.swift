@@ -193,7 +193,7 @@ final class AudioTests {
             XCTAssertEqual(track.year, 2026)
             XCTAssertEqual(FileMetadata.read("ARTIST", from: url), artist)
             try FileMetadata.writeArtwork(image, to: url)
-            XCTAssertEqual(await Track.artwork(for: url), image)
+            XCTAssertEqual(await Track.artwork(for: url), image, "Artwork write round trip: \(url.pathExtension)")
             XCTAssertEqual(try samples(url), before, "Metadata and artwork edits preserve decoded samples")
             try FileMetadata.write(["ALBUMARTIST": ""], to: url)
             XCTAssertEqual(FileMetadata.read("ALBUMARTIST", from: url), nil)
@@ -1315,7 +1315,9 @@ final class AudioTests {
             XCTAssertEqual(after.title, tags.title)
             XCTAssertEqual(after.artist, tags.artist)
             XCTAssertEqual(after.album, tags.album)
-            XCTAssertEqual(await Track.artwork(for: url), artwork)
+            XCTAssertEqual(
+                await Track.artwork(for: url), artwork,
+                "Artwork survives embedded lyrics editing: \(url.pathExtension)")
             try assertDecodes(url)
             let unchanged = try Data(contentsOf: url)
             try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url.path)
@@ -1382,7 +1384,9 @@ final class AudioTests {
         XCTAssertEqual(track.genre, "Ambient")
         XCTAssertEqual(track.composer, "A. Composer")
         XCTAssertEqual(await LyricsLoader.load(destination).plainText, "Embedded M4A words")
-        XCTAssertEqual(await Track.artwork(for: destination), coverData)
+        XCTAssertEqual(
+            await Track.artwork(for: destination), coverData,
+            "AVAssetExportSession artwork metadata round trip")
     }
 
     func testFLACArtwork() async throws {
@@ -1426,14 +1430,14 @@ final class AudioTests {
         let before = try parts(Data(contentsOf: url))
         let cover = try makeCover(red: 180)
         try FLACArtworkWriter.write(cover, to: url)
-        XCTAssertEqual(await Track.artwork(for: url), cover)
+        XCTAssertEqual(await Track.artwork(for: url), cover, "FLAC front cover write round trip")
         let after = try parts(Data(contentsOf: url))
         XCTAssertEqual(after.0, before.0, "FLAC audio frames must remain byte-for-byte identical")
         XCTAssertEqual(after.1, before.1, "Preserve tags, STREAMINFO, padding and other pictures")
         XCTAssertEqual(try await Track.read(url).title, "Preserve tags")
         try assertDecodes(url)
         try FLACArtworkWriter.write(back, to: url)
-        XCTAssertEqual(await Track.artwork(for: url), back)
+        XCTAssertEqual(await Track.artwork(for: url), back, "FLAC cover replacement round trip")
         XCTAssertEqual(try parts(Data(contentsOf: url)).0, before.0)
         let saved = try Data(contentsOf: url)
         do {
