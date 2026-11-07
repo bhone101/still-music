@@ -92,7 +92,7 @@ Online lyrics sends search metadata to LRCLIB only when enabled or explicitly re
 Still Music's original code and repository artwork are released under the [MIT License](LICENSE).
 Bundled dependencies retain their own licenses; see [third-party notices](THIRD_PARTY_NOTICES.md).
 
-## 0.2.0 macOS source changes (not yet published)
+## 0.2.0 macOS source changes
 
 - Restores the full playback queue, including repeated songs, ordering and playback mode.
 - Edits song tags individually or in batches in FLAC, MP3 and M4A, with a field-by-field review before writing.
@@ -100,4 +100,4 @@ Bundled dependencies retain their own licenses; see [third-party notices](THIRD_
 - Plays Opus, Ogg Vorbis, APE and WavPack using the bundled offline decoder. Native formats keep their existing direct playback path. Extra-format source bit depth is not currently displayed. Playback streams through bounded memory buffers and warms the next song; extra-codec transitions are not guaranteed gapless.
 - Includes a Developer ID signing/notarization script; actual notarization requires signing credentials.
 
-The download links above still point to the older published 0.1.1 preview.
+The macOS 0.2.0 and Android 0.8.0 preview downloads are available from the [v0.2.0 release](https://github.com/bhone101/still-music/releases/tag/v0.2.0).
