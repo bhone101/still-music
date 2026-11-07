@@ -165,6 +165,7 @@ public struct Track: Codable, Identifiable, Equatable, Sendable {
 
     public static func artwork(for url: URL) async -> Data? {
         if let picture = try? EmbeddedArtwork.flac(url) { return picture }
+        if let picture = EmbeddedArtwork.tagLib(url) { return picture }
         let asset = AVURLAsset(url: url)
         var metadata = (try? await asset.load(.commonMetadata)) ?? []
         for format in (try? await asset.load(.availableMetadataFormats)) ?? [] {

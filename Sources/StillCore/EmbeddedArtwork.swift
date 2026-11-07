@@ -1,6 +1,25 @@
 import Foundation
+import StillTagBridge
 
 enum EmbeddedArtwork {
+    static func tagLib(_ url: URL) -> Data? {
+        let format = url.pathExtension.lowercased()
+        guard ["mp3", "m4a", "mp4"].contains(format) else { return nil }
+        var size = 0
+        let queried = url.path.withCString { path in
+            format.withCString { still_read_artwork(path, $0, nil, 0, &size) }
+        }
+        guard queried == 2, size > 0, size <= 16 * 1024 * 1024 else { return nil }
+        var bytes = [UInt8](repeating: 0, count: size)
+        let read = bytes.withUnsafeMutableBufferPointer { buffer in
+            url.path.withCString { path in
+                format.withCString { still_read_artwork(path, $0, buffer.baseAddress, buffer.count, &size) }
+            }
+        }
+        guard read == 1, size == bytes.count else { return nil }
+        return Data(bytes)
+    }
+
     /// FLAC PICTURE blocks, preferring the front cover (type 3). Skip audio and
     /// unrelated metadata rather than reading a high-resolution song into RAM.
     static func flac(_ url: URL) throws -> Data? {

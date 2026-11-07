@@ -6,6 +6,8 @@
 #include <mp4item.h>
 #include <id3v2tag.h>
 #include <id3v2header.h>
+#include <id3v2tag.h>
+#include <attachedpictureframe.h>
 #include <unsynchronizedlyricsframe.h>
 #include <apetag.h>
 #include <xiphcomment.h>
@@ -153,6 +155,46 @@ extern "C" int still_write_artwork(const char *path, const char *format, const u
             covers.append(TagLib::MP4::CoverArt(png ? TagLib::MP4::CoverArt::PNG : TagLib::MP4::CoverArt::JPEG, data));
             file.tag()->setItem("covr", TagLib::MP4::Item(covers));
             return file.save();
+        }
+        return 0;
+    } catch (...) { return 0; }
+}
+
+extern "C" int still_read_artwork(const char *path, const char *format, unsigned char *bytes,
+                                   size_t capacity, size_t *size) {
+    try {
+        if (!path || !format || !size) return 0;
+        auto copy = [&](const TagLib::ByteVector &image) {
+            if (image.isEmpty()) return 0;
+            *size = static_cast<size_t>(image.size());
+            if (!bytes || capacity < *size) return 2;
+            std::memcpy(bytes, image.data(), *size);
+            return 1;
+        };
+        if (std::strcmp(format, "mp3") == 0) {
+            TagLib::MPEG::File file(path, true);
+            if (!file.isValid()) return 0;
+            auto *tag = file.ID3v2Tag(false);
+            if (!tag) return 0;
+            TagLib::ByteVector fallback;
+            for (auto *frame : tag->frameList("APIC")) {
+                auto *picture = dynamic_cast<TagLib::ID3v2::AttachedPictureFrame *>(frame);
+                if (!picture) continue;
+                const auto image = picture->picture();
+                if (image.isEmpty()) continue;
+                if (picture->type() == TagLib::ID3v2::AttachedPictureFrame::FrontCover) return copy(image);
+                if (fallback.isEmpty()) fallback = image;
+            }
+            return copy(fallback);
+        }
+        if (std::strcmp(format, "m4a") == 0 || std::strcmp(format, "mp4") == 0) {
+            TagLib::MP4::File file(path, true);
+            if (!file.isValid() || !file.tag()) return 0;
+            const auto covers = file.tag()->item("covr").toCoverArtList();
+            for (const auto &cover : covers) {
+                const auto image = cover.data();
+                if (!image.isEmpty()) return copy(image);
+            }
         }
         return 0;
     } catch (...) { return 0; }
