@@ -14,8 +14,12 @@ public enum LyricsLoader {
         return Lyrics()
     }
     static func decode(_ data: Data) -> String? {
-        if let text = String(data: data, encoding: .utf8) { return text.trimmingCharacters(in: CharacterSet(charactersIn: "\u{feff}")) }
-        if data.starts(with: [0xff, 0xfe]) || data.starts(with: [0xfe, 0xff]) { return String(data: data, encoding: .utf16) }
+        if let text = String(data: data, encoding: .utf8) {
+            return text.trimmingCharacters(in: CharacterSet(charactersIn: "\u{feff}"))
+        }
+        if data.starts(with: [0xff, 0xfe]) || data.starts(with: [0xfe, 0xff]) {
+            return String(data: data, encoding: .utf16)
+        }
         for encoding in [String.Encoding.windowsCP1252, .isoLatin1] {
             if let text = String(data: data, encoding: encoding) { return text }
         }
@@ -25,7 +29,8 @@ public enum LyricsLoader {
         for ext in ["lrc", "txt"] {
             let path = url.deletingPathExtension().appendingPathExtension(ext)
             guard let size = try? path.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 8 * 1024 * 1024,
-                  let data = try? Data(contentsOf: path), let text = decode(data) else { continue }
+                let data = try? Data(contentsOf: path), let text = decode(data)
+            else { continue }
             let lyrics = LRCParser.parse(text)
             if !lyrics.isEmpty { return lyrics }
         }
@@ -49,7 +54,9 @@ public enum LyricsLoader {
         for format in (try? await asset.load(.availableMetadataFormats)) ?? [] {
             for item in (try? await asset.loadMetadata(for: format)) ?? [] {
                 let key = item.identifier?.rawValue ?? String(describing: item.key)
-                guard key.contains("©lyr") || key.contains("USLT") || key.lowercased().contains("lyrics") else { continue }
+                guard key.contains("©lyr") || key.contains("USLT") || key.lowercased().contains("lyrics") else {
+                    continue
+                }
                 if let text = try? await item.load(.stringValue) {
                     let lyrics = LRCParser.parse(text)
                     if !lyrics.isEmpty { return lyrics }

@@ -11,7 +11,8 @@ enum FLACComments {
             guard let header = try file.read(upToCount: 4), header.count == 4 else { return [:] }
             let size = Int(header[1]) << 16 | Int(header[2]) << 8 | Int(header[3])
             if header[0] & 0x7f == 4 {
-                guard size <= 8 * 1024 * 1024, let payload = try file.read(upToCount: size), payload.count == size else { return [:] }
+                guard size <= 8 * 1024 * 1024, let payload = try file.read(upToCount: size), payload.count == size
+                else { return [:] }
                 return parse(payload)
             }
             if header[0] & 0x80 != 0 { break }

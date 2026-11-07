@@ -29,9 +29,13 @@ public enum ImportedLyrics {
         if FileManager.default.fileExists(atPath: legacy.path) { try FileManager.default.removeItem(at: legacy) }
         if mode != .draft {
             let baseline = baselineFile(for: song, root: root)
-            if FileManager.default.fileExists(atPath: baseline.path) { try FileManager.default.removeItem(at: baseline) }
+            if FileManager.default.fileExists(atPath: baseline.path) {
+                try FileManager.default.removeItem(at: baseline)
+            }
             let imported = file(for: song, root: root)
-            if FileManager.default.fileExists(atPath: imported.path) { try FileManager.default.removeItem(at: imported) }
+            if FileManager.default.fileExists(atPath: imported.path) {
+                try FileManager.default.removeItem(at: imported)
+            }
         }
     }
 
@@ -45,7 +49,9 @@ public enum ImportedLyrics {
         let previous: Mode
         if FileManager.default.fileExists(atPath: baseline.path) {
             previous = try JSONDecoder().decode(Mode.self, from: Data(contentsOf: baseline))
-        } else { previous = .local }
+        } else {
+            previous = .local
+        }
         try setMode(previous == .draft ? .local : previous, for: song, root: root)
     }
 

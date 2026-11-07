@@ -13,23 +13,23 @@ bash scripts/build-app.sh
 open "build/Still Music.app"
 ```
 
-The build script creates a locally signed app in `build/Still Music.app`. You can drag it into Applications. This build targets the architecture of the Mac that builds it; distribution and notarization are not configured.
+The build script creates a locally signed app in `build/Still Music.app`. You can drag it into Applications. This build targets the architecture of the Mac that builds it; Developer ID signing and notarization use the separate release script described in Development.md.
 
 ## Included
 
 - Add files or folders, or drop them into the window. Folder imports include subfolders.
-- Still Music remembers imported folders and scans for new songs at launch and about every five minutes while running (also on returning to the app if a scan is due). Existing libraries start with the parent folders of their songs. Empty imported folders are remembered. Scans run in the background and skip existing songs and unavailable drives. They reconcile missing paths with a unique existing match using tags and source audio properties, so moving songs and moving them back does not leave stale library entries. Existing copies, ambiguous matches, and offline-volume entries are retained. Favorites and queue references follow repaired paths without restarting playback. The first repair saves a `library.before-path-repair.json` backup. Removed library entries stay excluded from automatic scans; manually importing them again restores them. Folder paths and exclusions are saved alongside the library in `library.folders.json`, without changing `library.json`.
+- Still Music remembers imported folders and scans for new songs at launch and about every five minutes while running (also on returning to the app if a scan is due). Existing libraries start with the parent folders of their songs. Empty imported folders are remembered. Scans run in the background and skip existing songs and unavailable drives. They reconcile missing paths with a unique existing match using tags and source audio properties, so moving songs and moving them back does not leave stale library entries. Existing copies, ambiguous matches, and offline-volume entries are retained. Favorites and queue references follow repaired paths without restarting playback. The first repair saves a `library.before-path-repair.json` backup. Previously removed songs are restored by Scan when their files are available in watched folders. Folder paths are saved alongside the library in `library.folders.json`, without changing `library.json`.
 - FLAC, ALAC, WAV, AIFF, MP3, AAC, and CAF through the native macOS decoders.
 - Original source sample rate and bit depth displayed when available.
 - Bit Rate column shows average encoded audio bitrate in kbps, excluding metadata and artwork. Existing libraries refresh this value automatically.
 - Play/pause, next/previous, seeking, and automatic advance through the library.
 - Track metadata and embedded album art, with a simple fallback for untagged files.
 - Bottom now-playing bar with artwork, title, artist, album, source quality, and elapsed/remaining time.
-- The player sits beneath the content pane, leaving the sidebar full height. Song information and progress use half the bar; playback controls use the other half. The playback-mode button cycles Shuffle → Loop → Off. Shuffle reorders upcoming songs; Loop repeats the entire queue. The Queue popup lists upcoming entries and lets you jump to one, drag rows to reorder them, or remove individual entries with the minus button. Clear All removes upcoming entries and turns off loop so playback ends after the current song; the current track and library stay intact. Manual ordering becomes the baseline when shuffle is turned off. Right-click a song for **Play Next** or **Add to Queue**; duplicate entries are allowed. The queue and shuffle state last for the current app session.
+- The player sits beneath the content pane, leaving the sidebar full height. Song information and progress use half the bar; playback controls use the other half. The Shuffle button toggles On and Off. Turning it on randomizes upcoming songs; turning it off restores their original order. The current song keeps playing, and playback stops at the end of the queue. The Queue popup lists upcoming entries and lets you jump to one, drag rows to reorder them, or remove individual entries with the minus button. Clear All removes upcoming entries so playback ends after the current song; the current track and library stay intact. Manual ordering becomes the baseline when shuffle is turned off. Right-click a song for **Play Next** or **Add to Queue**; duplicate entries are allowed. The full queue, ordering, shuffle state are saved and restored on relaunch.
 - Click anywhere on the compact player except its buttons and seek slider to expand Now Playing inside the content pane. The expanded player resizes with the sidebar, shows artwork and controls beside local lyrics, and collapses with the down arrow or Escape. Lyrics are shown only in this expanded view. With no app draft or explicit written/deleted state, lookup follows same-name `.lrc`, then `.txt`, then embedded FLAC LYRICS/UNSYNCEDLYRICS, MP3 USLT/SYLT, or M4A lyrics. UTF-8, BOM-marked UTF-16, Windows-1252, and Latin-1 text are supported. Optional online lyrics are tried only after local sources; lyrics are never stored in the library JSON.
 - Timestamped lyrics highlight and follow playback; click a line to seek. Manual scrolling pauses following until **Resume following** or a lyric click. LRC offsets are milliseconds: positive offsets show lyrics earlier. Plain lyrics remain scrollable text; unavailable lyrics show “No lyrics found”.
 - Embedded cover thumbnails in songs and albums. FLAC PICTURE blocks prefer the front cover; native cover metadata supports formats such as MP3 and M4A. Album views use the first available embedded image in the album. Files without artwork show a placeholder.
-- Artwork loads asynchronously and is downsampled into a bounded memory cache. Refresh Song Metadata also refreshes cover art. Covers are added from local images only.
+- Artwork loads asynchronously and is downsampled into a bounded memory cache. Refresh Song Metadata also refreshes cover art. Covers can be chosen locally or searched with Find Album Cover.
 - Artists show circular artwork using an embedded cover from their songs, with a person placeholder when none is available. Sidebar icons share the blue used by the play button.
 - Sidebar views for Songs, Albums, Artists, Genres, Composers, Folders, and Favorites.
 - Album grouping uses album artist; Artists also groups by album artist, falling back to the performing artist. Album tracks sort by disc and track numbers when available.
@@ -39,7 +39,7 @@ The build script creates a locally signed app in `build/Still Music.app`. You ca
 - Heart buttons add songs to Favorites. Choose Light or Dark under **Settings → Theme** in the sidebar; favorites and appearance persist on relaunch.
 - Library, selected track, and position restored on relaunch (paused).
 - macOS Now Playing and media commands.
-- Right-click a track to show its file in Finder or remove it from the library. Removal never deletes the audio file.
+- Right-click a track to show its file in Finder or choose **Delete Song…**. Deletion requires a warning confirmation and permanently deletes the actual audio file, bypassing Trash. Removing a song from a playlist keeps the audio file.
 - Right-click any song and choose **Details** for a read-only sheet of tags, source audio properties, and file information. Missing values are hidden. Opening Details does not start playback, edit files, or change the saved library format.
 
 Keyboard: **⌘O** adds music, **Space** plays/pauses, **⌘→ / ⌘←** skips tracks.
@@ -54,11 +54,11 @@ Before switching, Still Music fades its own mixer down over approximately 8 ms a
 
 The original rate is restored at end-of-queue, explicit Stop, removal of the playing track, normal quit, or switching away from an output device. A temporary pause retains the rate. A default-device listener remains active while paused; output changes restore the former device and reconnect playback silently when it was running. Restoration failures are silent and retained for retry. Forced termination or an unplugged device can prevent restoration. Compatible consecutive tracks alternate between two player nodes on the same engine clock for gapless automatic transitions. Queue edits replace only the standby node, leaving the current song and mixer gain untouched. Their decoded sample rate and channel format must match. Rate/channel changes use the quiet reconfiguration path; manual skipping or seeking may interrupt playback. Still Music does not claim end-to-end bit-perfect DAC output.
 
-The graph is two alternating players → mixer → output, with no effects or extra sample-rate conversion node. The file is decoded as 32-bit float at its source rate; when hardware rates match, the mixer/output use that rate too. Float32 can represent up to 24-bit PCM exactly; 32-bit integer sources are not claimed to be bit-exact. No EQ, normalization, ReplayGain, or dithering is applied by Still Music. Playback uses unity app volume; loudness is controlled by macOS. Legacy saved app-volume values are ignored because the in-app volume control was removed. The existing volume field is retained in library JSON and saved as 1 for compatibility. System volume, mixing, channel mapping, and device processing may still alter the output. The quality label describes the **source file**, not a verified DAC signal.
+With the equalizer disabled, the graph is two alternating players → mixer → output, with no effects or extra sample-rate conversion node. The file is decoded as 32-bit float at its source rate; when hardware rates match, the mixer/output use that rate too. Float32 can represent up to 24-bit PCM exactly; 32-bit integer sources are not claimed to be bit-exact. The optional 10-band equalizer is off by default; when enabled it processes native and streamed playback with automatic headroom for boosted bands. No normalization, ReplayGain, or dithering is applied by Still Music. Playback uses unity app volume; loudness is controlled by macOS. Legacy saved app-volume values are ignored because the in-app volume control was removed. The existing volume field is retained in library JSON and saved as 1 for compatibility. System volume, mixing, channel mapping, and device processing may still alter the output. The quality label describes the **source file**, not a verified DAC signal.
 
 To check on hardware: note the output rate in Audio MIDI Setup, then play 44.1/48/96 kHz files. Try consecutive same-rate songs, unsupported rates, rapid next/previous, pause/resume, switching output devices, reaching the end of the queue, and quitting. Confirm no rate-related UI appears and that the former device’s rate is restored. Automated checks cover simulated rate selection/restoration failures, device changes, offline fades, and exact 16/24-bit PCM output across track boundaries at 44.1/48/96/192 kHz. Normal checks do not change device rates. Run `swift run StillChecks --verify-output-rates` for an explicit physical rate-switch/restore check; pause other playback first. This confirms nominal hardware rates, not captured DAC samples.
 
-Ogg/Vorbis/Opus, APE, WMA, and DSD are not part of the initial supported format list. Decoder support for optional codecs differs across macOS versions. DRM-protected streaming-service downloads are unsupported.
+Ogg Vorbis, Opus, APE and WavPack use the bundled offline decoder. WMA and DSD remain unsupported. Decoder support for optional codecs differs across macOS versions. DRM-protected streaming-service downloads are unsupported.
 
 ## Lyrics management and optional covers
 
@@ -79,13 +79,13 @@ Without an app draft or an explicit written/cleared state, local lookup uses sam
 Settings has two independent switches, both **off by default**:
 
 - **Find lyrics online:** when local lyrics are missing or unsynced, search [LRCLIB](https://lrclib.net/docs) with the song title and artist. Returned records must match title/artist and be within two seconds of the source duration; album matches are preferred locally. Synced results can replace plain local lyrics in the player; otherwise local lyrics remain. Automatic search does not replace app drafts, explicitly written lyrics, or a cleared state. Accepted results are staged in the app only. The network cache (including misses) is in memory, with up to 256 entries.
-- **Write covers into files:** explicitly chosen covers are also written into that album’s FLAC files, one at a time. MP3/M4A and other formats retain the selected cover in the app only. JPEG/PNG selections preserve their resolution (up to 8192 pixels per dimension and under 16 MB). The cover writer replaces front-cover PICTURE blocks in a temporary file, copying audio and other metadata unchanged. Turning this off does not undo previous writes. This cover preference is independent of lyrics actions.
+- **Write covers into files:** explicitly chosen covers are also written into that album’s FLAC, MP3 and M4A files, one at a time. Other formats retain the selected cover in the app only. JPEG/PNG selections preserve their resolution (up to 8192 pixels per dimension and under 16 MB). The cover writer replaces front covers in a temporary copy using TagLib; other FLAC/MP3 picture types are preserved. Turning this off does not undo previous writes. This cover preference is independent of lyrics actions.
 
 Right-click a song or album for **Choose Album Cover…**. There is no online cover lookup. App covers are stored in `library.covers` and take priority over embedded art.
 
 LRCLIB receives the search title/artist and normal connection information such as IP address, never audio files, uploaded lyric files, or local paths. Automatic requests are off by default; pressing Find online explicitly requests a search. Requests use HTTPS, timeouts, response-size limits, and at least 1.1 seconds between requests. Ordinary checks use mock services and never send library metadata online.
 
-Manual checks: on copies of a FLAC, MP3, and M4A, upload synced then plain lyrics and verify the audio files stay unchanged. Choose Write lyrics to file; cancel once, then confirm. Reopen the files and verify embedded lyrics, other tags, artwork, and playback. Delete; cancel once, then confirm, and check that lyrics remain empty after a restart. Verify separate sidecars remain on disk and that a new upload/search can stage lyrics again. Try a read-only file and an unsupported format. For covers, verify the separate preference still writes only FLAC covers.
+Manual checks: on copies of a FLAC, MP3, and M4A, upload synced then plain lyrics and verify the audio files stay unchanged. Choose Write lyrics to file; cancel once, then confirm. Reopen the files and verify embedded lyrics, other tags, artwork, and playback. Delete; cancel once, then confirm, and check that lyrics remain empty after a restart. Verify separate sidecars remain on disk and that a new upload/search can stage lyrics again. Try a read-only file and an unsupported format. For covers, verify the separate preference still writes covers to FLAC, MP3 and M4A.
 
 ## Audio diagnostics
 
@@ -97,7 +97,7 @@ To check queue edits: play a long song and repeatedly choose **Play Next**, **Ad
 
 Click **+** beside **Playlists** in the sidebar. Enter a name to create it; saved playlists appear below Favorites. Open a playlist and choose **Add songs** to select library songs, or right-click any song and use **Add to playlist**. Duplicate additions are prevented. Play starts that playlist’s visible song order. Right-click playlist songs to move them up/down or remove them from the playlist; neither operation changes the source files. Search filters the displayed songs without changing the saved order.
 
-Right-click a playlist (or use its header menu) to rename or delete it. Deletion requires confirmation and leaves the music library and current playback queue intact. Playlist edits are saved atomically in `library.playlists.json` beside the existing library, preserving `library.json`’s format. Folder-path repairs update playlist references, and removing a song from the library removes its playlist memberships.
+Right-click a playlist (or use its header menu) to rename or delete it. Deletion requires confirmation and leaves the music library and current playback queue intact. Playlist edits are saved atomically in `library.playlists.json` beside the existing library, preserving `library.json`’s format. Folder-path repairs update playlist references.
 
 Manual checks: create a playlist using **+** beside **Playlists**, add several songs using both the picker and song menu, try adding the same song twice, reorder and play it, rename it, then relaunch to check persistence. Remove a playlist song and verify it remains in Songs. Delete the playlist and verify playback and source files remain intact.
 
@@ -119,3 +119,56 @@ swift run StillChecks
 ```
 
 The standalone checks run with Command Line Tools and the built TagLib dependency, without XCTest or a full Xcode installation. Embedded lyrics checks compare encoded audio payloads byte-for-byte before and after writes/deletions in FLAC, MP3 and M4A, verify tag/artwork preservation, draft persistence, and failure handling. They generate synthetic PCM audio and convert it with Apple's `afconvert`, checking high-resolution decoding, source metadata, folder import, duplicate handling, missing/corrupt files, and library persistence.
+
+## Tags and cover search (0.2.0)
+
+Single-click a song to select it; double-click to play. Use Command-click to select separate songs and Shift-click for a range. Choose **Edit Song Info…** from a song’s ellipsis menu, right-click menu, or **File → Edit Song Info** to edit that selection directly. Right-clicking a selected song also edits the selection; right-clicking an unselected song edits that song. Only FLAC, MP3 and M4A files are editable. Check the fields to apply; unchecked fields stay unchanged and checked empty fields remove tags. Review the changes before writing. Each file is replaced atomically after editing a temporary copy. Batch progress shows the current song number. **Cancel Update** finishes the current file and stops before the next. A cancelled or partially failed batch summarizes updated, failed and unattempted songs, with individual failure details. This edits source files, so keep backups.
+
+Right-click a song → **Find Album Cover**, edit the search text and press Search. Choose a release, review its cover, then use **Use Selected Cover**. No match or cancellation leaves the existing cover alone. Applied covers affect the album. The Settings cover-writing switch also embeds images in FLAC, MP3 and M4A; it remains off by default.
+
+Extra-codec playback streams source-rate float audio through bounded memory buffers; it does not create decoded temporary files or wait for the whole song to finish decoding. The next extra-codec song is warmed with one buffer. Seeking restarts decoding at the requested position; a stalled decoder times out after 15 seconds. Native-format gapless playback retains its existing behavior. Extra-codec transitions still reconfigure playback and are not guaranteed gapless. Full source bit-depth reporting for extra codecs is not yet implemented.
+
+Library changes save on a background serial writer. Playback position uses a small separate checkpoint every ten seconds, with pending writes flushed on normal quit.
+
+## Compact windows
+
+The window can shrink to 640 × 480. Below 850 points wide, the sidebar hides automatically, song rows omit codec/bitrate columns, and playback controls stack below the track information. Use the sidebar button to reopen navigation. The compact expanded player keeps lyrics and playback controls visible. Shuffle uses a single On/Off toggle.
+
+Song rows use compact spacing by default. Song actions are available from the ellipsis beside each song or the right-click menu. The Now Playing bar divides its width evenly between track information and playback controls.
+
+### On Repeat
+
+**Playlists → On Repeat**, below Favorites, automatically lists up to 30 of your most-played songs from the past 30 days. Songs are ranked by qualified play count, with recent listens breaking ties. History starts with this version and stays local in your library. A play counts after 30 seconds of actual playback, or half the song for tracks shorter than a minute; pauses and seeks add no listening time. Each playback session counts once. The list refreshes as you listen and ages out older plays. Only songs currently in the library are included. Use Play, double-click a song, or queue songs as usual. This is Still’s local implementation of the listening-history idea, not Spotify’s proprietary ranking algorithm.
+
+### Selected-song actions
+
+Right-click a selected song to apply Edit Song Info, Play Next, Add to Queue, and playlist actions to all selected songs. New playlists include the whole selection. Queue additions preserve the displayed song order. Details, Show in Finder, artwork, and individual playlist move commands appear only for a single song.
+
+## Permanently deleting a song
+
+Right-click one song or open its action menu and choose **Delete Song…**. Review
+its title and full file path, then choose **Delete File**. This permanently deletes
+the original audio file, bypasses Trash, and cannot be undone in Still. Cancel
+keeps the file. Each song requires its own confirmation; the action is hidden for
+multiple selection. Deletion is unavailable while scanning or writing metadata.
+After success, Still removes the song from its library, favorites, queue and
+playlists. Deleting the current song stops playback. If file deletion fails, its
+library entry is retained and an error is shown. Other audio and sidecar files
+are not deleted. Scanning cannot recover a file that has been permanently deleted.
+
+
+### Browse from Now Playing
+
+In expanded Now Playing, use **Browse song → Go to album / Go to artist** beneath playback controls. This menu is hidden in the minimized playback bar. A **Return to Now Playing** button stays above the collection until you return. Browsing does not replace the playing queue.
+
+### Playback and accessibility settings
+
+**Settings → Playback** has a 10-band equalizer (32 Hz–16 kHz, ±12 dB). The switch takes effect immediately. Choose Flat, Bass Boost, Treble Boost, Vocal, V-shaped, or Softer highs. Ten vertical sliders show the frequency bands, with a separate preamp slider. Custom is shown when your band gains do not match a preset. Narrow windows allow horizontal scrolling. Presets and sliders update playing audio immediately without restarting it. Turning EQ on or off briefly restarts playback at its current position to insert or remove the EQ node. **Reset** restores zero gains and automatic preamp. Turning it off preserves your chosen gains. Automatic preamp reduces gain by the largest boost. Turn it off to set the preamp manually (±12 dB); positive manual gain can distort. Automatic headroom is not a limiter or a guarantee against clipping. Bands too high for the source sample rate are bypassed.
+
+**Settings → Appearance → Larger library text** increases song and secondary labels and selects the compact layout at wider window widths. Compact rows place duration below the title. Neutral colors respond to macOS Increase Contrast, alongside existing VoiceOver labels and Reduce Motion support.
+
+File opening and decoder startup run off the main UI thread. Playback preparation happens silently, without a loading message or changes to the player layout. An open failure retains the selected song and reports the error.
+
+### Equalizer fidelity checks
+
+StillChecks compares decoded PCM sample-for-sample for EQ off and Flat with automatic preamp at 44.1, 48, 96, and 192 kHz, in 16-bit and 24-bit fixtures. Zero-gain bands bypass their filters. Live updates establish additional preamp attenuation before raising band gains. These offline checks validate the app’s audio graph, not the DAC, system mixer, Bluetooth codec, speakers, or headphones. Non-flat EQ intentionally changes the signal; automatic headroom is not a peak limiter and cannot guarantee that every recording or manual setting is free of clipping.

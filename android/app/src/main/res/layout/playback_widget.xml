@@ -1,0 +1,11 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="horizontal"
+    android:gravity="center_vertical" android:padding="12dp" android:background="@drawable/widget_background">
+    <LinearLayout android:id="@+id/widget_text" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center_vertical">
+        <TextView android:id="@+id/widget_title" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/widget_name" android:textColor="#FFFFFF" android:textSize="16sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end"/>
+        <TextView android:id="@+id/widget_artist" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#C5C8CE" android:textSize="13sp" android:maxLines="1" android:ellipsize="end"/>
+    </LinearLayout>
+    <ImageButton android:id="@+id/widget_previous" android:layout_width="48dp" android:layout_height="48dp" android:background="@android:color/transparent" android:tint="#FFFFFF" android:src="@android:drawable/ic_media_previous" android:contentDescription="@string/widget_previous"/>
+    <ImageButton android:id="@+id/widget_play" android:layout_width="48dp" android:layout_height="48dp" android:background="@android:color/transparent" android:tint="#78ADFF" android:src="@android:drawable/ic_media_play" android:contentDescription="@string/widget_play"/>
+    <ImageButton android:id="@+id/widget_next" android:layout_width="48dp" android:layout_height="48dp" android:background="@android:color/transparent" android:tint="#FFFFFF" android:src="@android:drawable/ic_media_next" android:contentDescription="@string/widget_next"/>
+</LinearLayout>

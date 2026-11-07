@@ -19,28 +19,42 @@ import AVFoundation
     public let outputRate: Double
     public var upcomingEntryID: UUID? { nextFile?.id }
     public var duration: Double { Double(file.length) / file.processingFormat.sampleRate }
-    public var volume: Float = 1 { didSet { node.volume = volume; standby.volume = volume } }
+    public var volume: Float = 1 {
+        didSet {
+            node.volume = volume
+            standby.volume = volume
+        }
+    }
+    public func updateEqualizer(_ settings: EqualizerSettings) -> Bool {
+        EqualizerGraph.update(engine, settings: settings)
+    }
     public var currentTime: Double {
-        guard node.isPlaying, let render = node.lastRenderTime, render.isSampleTimeValid || render.isHostTimeValid, let time = node.playerTime(forNodeTime: render) else { return offset }
+        guard node.isPlaying, let render = node.lastRenderTime, render.isSampleTimeValid || render.isHostTimeValid,
+            let time = node.playerTime(forNodeTime: render)
+        else { return offset }
         return min(duration, max(0, offset + Double(time.sampleTime) / time.sampleRate))
     }
 
-    public init(file: AVAudioFile, engine: AVAudioEngine = AVAudioEngine()) throws {
+    public init(file: AVAudioFile, engine: AVAudioEngine = AVAudioEngine(), equalizer: EqualizerSettings = .init()) throws {
         self.file = file
         self.engine = engine
-        let output = engine.isInManualRenderingMode ? engine.manualRenderingFormat : engine.outputNode.inputFormat(forBus: 0)
+        let output =
+            engine.isInManualRenderingMode ? engine.manualRenderingFormat : engine.outputNode.inputFormat(forBus: 0)
         guard output.sampleRate > 0, output.channelCount > 0 else { throw RateError.deviceChanged }
         outputRate = output.sampleRate
         engine.attach(node)
         engine.attach(standby)
         // The graph uses 32-bit float internally, which represents up to 24-bit PCM exactly.
-        // 32-bit integer sources are not claimed to be bit-exact. No EQ, normalization or dithering.
+        // 32-bit integer sources are not claimed to be bit-exact. EQ is opt-in.
         // At matching rates, source -> mixer -> output has no sample-rate conversion node.
-        engine.connect(node, to: engine.mainMixerNode, format: file.processingFormat)
-        engine.connect(standby, to: engine.mainMixerNode, format: file.processingFormat)
-        if !engine.isInManualRenderingMode { engine.connect(engine.mainMixerNode, to: engine.outputNode, format: output) }
+        EqualizerGraph.connect(engine, sources: [node, standby], format: file.processingFormat, settings: equalizer)
+        if !engine.isInManualRenderingMode {
+            engine.connect(engine.mainMixerNode, to: engine.outputNode, format: output)
+        }
         engine.mainMixerNode.outputVolume = 1
-        observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+        observer = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
+        ) { [weak self] _ in
             Task { @MainActor in self?.onConfigurationChange?() }
         }
     }
@@ -52,7 +66,10 @@ import AVFoundation
         activeToken = UUID()
         offset = min(max(0, seconds), duration)
         let start = AVAudioFramePosition(offset * file.processingFormat.sampleRate)
-        guard start < file.length else { onCompletion?(); return }
+        guard start < file.length else {
+            onCompletion?()
+            return
+        }
         guard file.length - start <= Int64(UInt32.max) else { throw RateError.status(-50) }
         scheduledFrames = file.length - start
         schedule(file, on: node, start: start, token: activeToken)
@@ -60,7 +77,8 @@ import AVFoundation
         try engine.start()
         // Both nodes use the engine clock. Offline rendering has an exact sample
         // origin; a short host-time lead lets hardware start the graph silently.
-        let anchor = engine.isInManualRenderingMode
+        let anchor =
+            engine.isInManualRenderingMode
             ? AVAudioTime(sampleTime: engine.manualRenderingSampleTime, atRate: outputRate)
             : AVAudioTime(hostTime: mach_absolute_time() + AVAudioTime.hostTime(forSeconds: 0.02))
         startTime = anchor
@@ -79,13 +97,15 @@ import AVFoundation
     /// A scheduled successor that has started is now the current song.
     public func synchronizeQueueBoundary() {
         guard nextFile != nil, let render = standby.lastRenderTime,
-              let time = standby.playerTime(forNodeTime: render), time.sampleTime >= 0 else { return }
+            let time = standby.playerTime(forNodeTime: render), time.sampleTime >= 0
+        else { return }
         complete(token: activeToken)
     }
 
     @discardableResult public func preload(_ next: AVAudioFile, id: UUID) -> Bool {
         guard next.length > 0, next.length <= Int64(UInt32.max),
-              file.processingFormat.isEqual(next.processingFormat), let anchor = startTime else {
+            file.processingFormat.isEqual(next.processingFormat), let anchor = startTime
+        else {
             clearNext()
             return false
         }
@@ -96,9 +116,15 @@ import AVFoundation
         if let converted = node.nodeTime(forPlayerTime: end) {
             when = converted
         } else if anchor.isSampleTimeValid {
-            when = AVAudioTime(sampleTime: anchor.sampleTime + AVAudioFramePosition(Double(scheduledFrames) * anchor.sampleRate / file.processingFormat.sampleRate), atRate: anchor.sampleRate)
+            when = AVAudioTime(
+                sampleTime: anchor.sampleTime
+                    + AVAudioFramePosition(
+                        Double(scheduledFrames) * anchor.sampleRate / file.processingFormat.sampleRate),
+                atRate: anchor.sampleRate)
         } else {
-            when = AVAudioTime(hostTime: anchor.hostTime + AVAudioTime.hostTime(forSeconds: Double(scheduledFrames) / file.processingFormat.sampleRate))
+            when = AVAudioTime(
+                hostTime: anchor.hostTime
+                    + AVAudioTime.hostTime(forSeconds: Double(scheduledFrames) / file.processingFormat.sampleRate))
         }
         let token = UUID()
         nextFile = (id, next, token, when)
@@ -107,10 +133,14 @@ import AVFoundation
         return true
     }
 
-    private func schedule(_ scheduled: AVAudioFile, on player: AVAudioPlayerNode, start: AVAudioFramePosition, token: UUID) {
+    private func schedule(
+        _ scheduled: AVAudioFile, on player: AVAudioPlayerNode, start: AVAudioFramePosition, token: UUID
+    ) {
         let generation = generation
-        player.scheduleSegment(scheduled, startingFrame: start, frameCount: AVAudioFrameCount(scheduled.length - start), at: nil,
-                               completionCallbackType: engine.isInManualRenderingMode ? .dataRendered : .dataPlayedBack) { [weak self] _ in
+        player.scheduleSegment(
+            scheduled, startingFrame: start, frameCount: AVAudioFrameCount(scheduled.length - start), at: nil,
+            completionCallbackType: engine.isInManualRenderingMode ? .dataRendered : .dataPlayedBack
+        ) { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self, self.generation == generation else { return }
                 self.complete(token: token)

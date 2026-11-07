@@ -6,7 +6,8 @@ enum ID3Lyrics {
         guard let file = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? file.close() }
         guard let header = try? file.read(upToCount: 10), header.count == 10,
-              header.prefix(3) == Data("ID3".utf8), (2...4).contains(header[3]) else { return nil }
+            header.prefix(3) == Data("ID3".utf8), (2...4).contains(header[3])
+        else { return nil }
         let version = header[3]
         let size = number(Array(header[6..<10]), syncsafe: true)
         guard size <= 16 * 1024 * 1024, let raw = try? file.read(upToCount: size), raw.count == size else { return nil }
@@ -26,18 +27,25 @@ enum ID3Lyrics {
             let idLength = version == 2 ? 3 : 4
             let id = String(bytes: bytes[cursor..<cursor + idLength], encoding: .ascii) ?? ""
             if bytes[cursor] == 0 { break }
-            let length = number(Array(bytes[cursor + idLength..<cursor + (version == 2 ? 6 : 8)]), syncsafe: version == 4)
+            let length = number(
+                Array(bytes[cursor + idLength..<cursor + (version == 2 ? 6 : 8)]), syncsafe: version == 4)
             let flags = version == 2 ? 0 : bytes[cursor + 9]
             cursor += frameHeader
             guard length > 0, length <= bytes.count - cursor else { break }
-            var body = Array(bytes[cursor..<cursor + length]); cursor += length
+            var body = Array(bytes[cursor..<cursor + length])
+            cursor += length
             guard ["USLT", "SYLT", "ULT", "SLT"].contains(id) else { continue }
             // Compressed/encrypted lyrics aren't safe to interpret as text.
             if version == 3, flags & 0xc0 != 0 { continue }
             if version == 4, flags & 0x0c != 0 { continue }
             if version == 4, flags & 0x02 != 0 || header[5] & 0x80 != 0 { body = unsynchronize(body) }
-            if (version == 3 && flags & 0x20 != 0) || (version == 4 && flags & 0x40 != 0) { if !body.isEmpty { body.removeFirst() } }
-            if version == 4, flags & 0x01 != 0 { guard body.count >= 4 else { continue }; body.removeFirst(4) }
+            if (version == 3 && flags & 0x20 != 0) || (version == 4 && flags & 0x40 != 0) {
+                if !body.isEmpty { body.removeFirst() }
+            }
+            if version == 4, flags & 0x01 != 0 {
+                guard body.count >= 4 else { continue }
+                body.removeFirst(4)
+            }
             guard body.count >= 4, body[0] <= 3 else { continue }
             let encoding = body[0]
             let synced = id == "SYLT" || id == "SLT"
@@ -47,21 +55,25 @@ enum ID3Lyrics {
             func decode(_ bytes: [UInt8]) -> String {
                 if encoding == 1, bytes.starts(with: [0xfe, 0xff]) { utf16 = .utf16BigEndian }
                 if encoding == 1, bytes.starts(with: [0xff, 0xfe]) { utf16 = .utf16LittleEndian }
-                let charset: String.Encoding = encoding == 0 ? .isoLatin1 : encoding == 3 ? .utf8 : encoding == 2 ? .utf16BigEndian : utf16
-                return (String(data: Data(bytes), encoding: charset) ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "\u{feff}"))
+                let charset: String.Encoding =
+                    encoding == 0 ? .isoLatin1 : encoding == 3 ? .utf8 : encoding == 2 ? .utf16BigEndian : utf16
+                return (String(data: Data(bytes), encoding: charset) ?? "").trimmingCharacters(
+                    in: CharacterSet(charactersIn: "\u{feff}"))
             }
             func terminated() -> String? {
                 let start = index
                 let step = encoding == 1 || encoding == 2 ? 2 : 1
                 while index + step <= body.count {
                     if body[index] == 0 && (step == 1 || body[index + 1] == 0) {
-                        let text = decode(Array(body[start..<index])); index += step; return text
+                        let text = decode(Array(body[start..<index]))
+                        index += step
+                        return text
                     }
                     index += step
                 }
                 return nil
             }
-            guard terminated() != nil else { continue } // content descriptor
+            guard terminated() != nil else { continue }  // content descriptor
             if synced {
                 let unit = body[4]
                 guard unit == 1 || unit == 2 else { continue }

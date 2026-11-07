@@ -13,7 +13,8 @@ public enum LyricsWriter {
 
     public static func encode(_ lyrics: Lyrics) throws -> Data {
         guard !lyrics.isEmpty,
-              lyrics.lines.allSatisfy({ $0.time.isFinite && abs($0.time) < 1_000_000_000 }) else {
+            lyrics.lines.allSatisfy({ $0.time.isFinite && abs($0.time) < 1_000_000_000 })
+        else {
             throw CocoaError(.fileWriteInvalidFileName)
         }
         if lyrics.lines.isEmpty {
@@ -46,9 +47,13 @@ public enum LyricsWriter {
     }
 
     private static func writeData(_ data: Data, to destination: URL, replace: Bool) throws {
-        if replace { try data.write(to: destination, options: .atomic); return }
+        if replace {
+            try data.write(to: destination, options: .atomic)
+            return
+        }
         // Publish a complete sidecar without an existence-check/overwrite race.
-        let temporary = destination.deletingLastPathComponent().appendingPathComponent(".still-lyrics-\(UUID().uuidString)")
+        let temporary = destination.deletingLastPathComponent().appendingPathComponent(
+            ".still-lyrics-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: temporary) }
         try data.write(to: temporary, options: .withoutOverwriting)
         if renamex_np(temporary.path, destination.path, UInt32(RENAME_EXCL)) != 0 {

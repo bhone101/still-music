@@ -32,8 +32,7 @@ public enum SampleRatePolicy {
 
     /// Callers serialize match and restore, including cancelled playback requests.
     public func match(source: Double, enabled: Bool) async throws -> Double {
-        do { return try await matchRate(source: source, enabled: enabled) }
-        catch {
+        do { return try await matchRate(source: source, enabled: enabled) } catch {
             if !(error is CancellationError) {
                 diagnostics?.record(.rateFailed, sourceRate: source, status: AudioDiagnostics.statusCode(error))
             }
@@ -73,9 +72,10 @@ public enum SampleRatePolicy {
                 originals.removeValue(forKey: device)
                 diagnostics?.record(.rateRestored, device: device, outputRate: rate)
             } catch {
-                diagnostics?.record(.restoreFailed, device: device, outputRate: rate, status: AudioDiagnostics.statusCode(error))
+                diagnostics?.record(
+                    .restoreFailed, device: device, outputRate: rate, status: AudioDiagnostics.statusCode(error))
                 failure = error
-            } // Keep unsuccessful restorations for a later retry.
+            }  // Keep unsuccessful restorations for a later retry.
         }
         if let failure { throw failure }
     }
@@ -95,13 +95,15 @@ public enum RateError: LocalizedError {
 @MainActor public final class CoreAudioRateHardware: OutputRateHardware {
     public init() {}
     private func address(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
-        AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        AudioObjectPropertyAddress(
+            mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
     }
     public func defaultDevice() throws -> AudioDeviceID {
         var property = address(kAudioHardwarePropertyDefaultOutputDevice)
         var device = AudioDeviceID(0)
         var size = UInt32(MemoryLayout.size(ofValue: device))
-        try check(AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &property, 0, nil, &size, &device))
+        try check(
+            AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &property, 0, nil, &size, &device))
         guard device != 0 else { throw RateError.deviceChanged }
         return device
     }
@@ -116,7 +118,8 @@ public enum RateError: LocalizedError {
         var property = address(kAudioDevicePropertyAvailableNominalSampleRates)
         var size: UInt32 = 0
         try check(AudioObjectGetPropertyDataSize(device, &property, 0, nil, &size))
-        var values = [AudioValueRange](repeating: AudioValueRange(), count: Int(size) / MemoryLayout<AudioValueRange>.stride)
+        var values = [AudioValueRange](
+            repeating: AudioValueRange(), count: Int(size) / MemoryLayout<AudioValueRange>.stride)
         guard !values.isEmpty else { return [] }
         try values.withUnsafeMutableBytes { bytes in
             try check(AudioObjectGetPropertyData(device, &property, 0, nil, &size, bytes.baseAddress!))
@@ -141,8 +144,12 @@ public enum RateError: LocalizedError {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             wait.continuation = continuation
             var target = value
-            let status = AudioObjectSetPropertyData(device, &property, 0, nil, UInt32(MemoryLayout.size(ofValue: target)), &target)
-            if status != noErr { wait.finish(RateError.status(status)); return }
+            let status = AudioObjectSetPropertyData(
+                device, &property, 0, nil, UInt32(MemoryLayout.size(ofValue: target)), &target)
+            if status != noErr {
+                wait.finish(RateError.status(status))
+                return
+            }
             // Some devices complete synchronously; the listener was installed before the write.
             if let actual = try? rate(device), abs(actual - value) < 0.01 { wait.finish(nil) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { wait.finish(RateError.timeout) }
@@ -162,15 +169,20 @@ public enum RateError: LocalizedError {
 
 /// Observe default-device changes even while paused, when no engine is running.
 @MainActor public final class OutputDeviceMonitor {
-    private var property = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+    private var property = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDefaultOutputDevice,
         mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
     private let listener: AudioObjectPropertyListenerBlock
     private var installed = false
     public init(onChange: @escaping @MainActor () -> Void) {
         listener = { _, _ in MainActor.assumeIsolated { onChange() } }
-        installed = AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &property, .main, listener) == noErr
+        installed =
+            AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &property, .main, listener)
+            == noErr
     }
     deinit {
-        if installed { AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &property, .main, listener) }
+        if installed {
+            AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &property, .main, listener)
+        }
     }
 }

@@ -4,7 +4,10 @@ public struct Lyrics: Equatable, Sendable, Codable {
     public struct Line: Equatable, Sendable, Codable {
         public let time: Double
         public let text: String
-        public init(time: Double, text: String) { self.time = time; self.text = text }
+        public init(time: Double, text: String) {
+            self.time = time
+            self.text = text
+        }
     }
     public let lines: [Line]
     public let plainText: String
@@ -33,29 +36,42 @@ public struct Lyrics: Equatable, Sendable, Codable {
 public enum LRCParser {
     public static func parse(_ text: String) -> Lyrics {
         let timestamp = try! NSRegularExpression(pattern: #"\[(\d+):([0-5]\d)(?:\.(\d{1,3}))?\]"#)
-        let metadata = try! NSRegularExpression(pattern: #"\[(?:ar|ti|al|by|re|ve|length|offset):[^\]]*\]"#, options: .caseInsensitive)
+        let metadata = try! NSRegularExpression(
+            pattern: #"\[(?:ar|ti|al|by|re|ve|length|offset):[^\]]*\]"#, options: .caseInsensitive)
         let offsetTag = try! NSRegularExpression(pattern: #"\[offset:([+-]?\d+)\]"#, options: .caseInsensitive)
         let fullRange = NSRange(text.startIndex..., in: text)
         var offset = 0.0
         if let match = offsetTag.matches(in: text, range: fullRange).last,
-           let range = Range(match.range(at: 1), in: text), let ms = Double(text[range]), ms.isFinite { offset = ms / 1000 }
+            let range = Range(match.range(at: 1), in: text), let ms = Double(text[range]), ms.isFinite
+        {
+            offset = ms / 1000
+        }
         var lines: [Lyrics.Line] = []
         var plain: [String] = []
         for raw in text.components(separatedBy: .newlines) {
-            let clean = metadata.stringByReplacingMatches(in: raw, range: NSRange(raw.startIndex..., in: raw), withTemplate: "")
+            let clean = metadata.stringByReplacingMatches(
+                in: raw, range: NSRange(raw.startIndex..., in: raw), withTemplate: "")
             let matches = timestamp.matches(in: clean, range: NSRange(clean.startIndex..., in: clean))
-            let words = timestamp.stringByReplacingMatches(in: clean, range: NSRange(clean.startIndex..., in: clean), withTemplate: "").trimmingCharacters(in: .whitespaces)
+            let words = timestamp.stringByReplacingMatches(
+                in: clean, range: NSRange(clean.startIndex..., in: clean), withTemplate: ""
+            ).trimmingCharacters(in: .whitespaces)
             if matches.isEmpty {
                 if !clean.isEmpty || raw.trimmingCharacters(in: .whitespaces).isEmpty { plain.append(clean) }
                 continue
             }
             for match in matches {
-                func value(_ index: Int) -> String { Range(match.range(at: index), in: clean).map { String(clean[$0]) } ?? "" }
+                func value(_ index: Int) -> String {
+                    Range(match.range(at: index), in: clean).map { String(clean[$0]) } ?? ""
+                }
                 let fraction = value(3)
-                let time = (Double(value(1)) ?? 0) * 60 + (Double(value(2)) ?? 0) + (Double("0." + fraction) ?? 0) - offset
+                let time =
+                    (Double(value(1)) ?? 0) * 60 + (Double(value(2)) ?? 0) + (Double("0." + fraction) ?? 0) - offset
                 if time.isFinite { lines.append(.init(time: time, text: words)) }
             }
         }
-        return Lyrics(lines: lines, plainText: lines.isEmpty ? plain.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines) : "")
+        return Lyrics(
+            lines: lines,
+            plainText: lines.isEmpty
+                ? plain.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines) : "")
     }
 }

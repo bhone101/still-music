@@ -5,39 +5,53 @@ private typealias LyricsState<Value> = SwiftUI.State<Value>
 
 struct LyricsView: View {
     @ObservedObject var model: PlayerModel
+    @ObservedObject var clock: PlaybackClock
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @LyricsState private var following = true
-    private var currentLine: Int? { model.lyrics.currentLine(at: model.position) }
+    private var currentLine: Int? { model.lyrics.currentLine(at: clock.position) }
 
     private var lyricsHeader: some View {
         Menu {
-            Button { model.findCurrentLyricsOnline() } label: {
+            Button {
+                model.findCurrentLyricsOnline()
+            } label: {
                 Label("Find online", systemImage: "magnifyingglass")
             }
             .disabled(model.current == nil || model.loadingLyrics || model.savingLyrics || model.uploadingLyrics)
             .help("Search LRCLIB using this song’s title and artist")
-            Button { model.uploadLyrics() } label: {
+            Button {
+                model.uploadLyrics()
+            } label: {
                 Label("Import lyrics", systemImage: "square.and.arrow.up")
             }
             .disabled(model.current == nil || model.uploadingLyrics || model.savingLyrics)
             .help("Choose a local .lrc or .txt file for this song")
-            Button { model.writeLyricsToFile() } label: {
+            Button {
+                model.writeLyricsToFile()
+            } label: {
                 Label("Write lyrics to file", systemImage: "square.and.arrow.down")
             }
-            .disabled(!model.canWriteEmbeddedLyrics || model.lyrics.isEmpty || model.savingLyrics || model.loadingLyrics || model.uploadingLyrics || model.savingCover)
+            .disabled(
+                !model.canWriteEmbeddedLyrics || model.lyrics.isEmpty || model.savingLyrics || model.loadingLyrics
+                    || model.uploadingLyrics || model.savingCover
+            )
             .help("Replace embedded lyrics in this FLAC, MP3 or M4A file")
             Button {
-                if model.hasUnsavedLyrics { model.discardLyricsChanges() }
-                else { model.deleteLyrics() }
+                if model.hasUnsavedLyrics { model.discardLyricsChanges() } else { model.deleteLyrics() }
             } label: {
-                Label(model.hasUnsavedLyrics ? "Discard changes" : "Delete lyrics",
-                      systemImage: model.hasUnsavedLyrics ? "arrow.uturn.backward" : "trash")
+                Label(
+                    model.hasUnsavedLyrics ? "Discard changes" : "Delete lyrics",
+                    systemImage: model.hasUnsavedLyrics ? "arrow.uturn.backward" : "trash")
             }
-            .disabled(model.loadingLyrics || model.savingLyrics || model.uploadingLyrics ||
-                      (!model.hasUnsavedLyrics && (!model.canWriteEmbeddedLyrics || !model.canDeleteLyrics || model.savingCover)))
-            .help(model.hasUnsavedLyrics
-                  ? "Remove the app draft without changing the audio or sidecar files"
-                  : "Remove embedded lyrics and clear this song’s lyrics in Still Music")
+            .disabled(
+                model.loadingLyrics || model.savingLyrics || model.uploadingLyrics
+                    || (!model.hasUnsavedLyrics
+                        && (!model.canWriteEmbeddedLyrics || !model.canDeleteLyrics || model.savingCover))
+            )
+            .help(
+                model.hasUnsavedLyrics
+                    ? "Remove the app draft without changing the audio or sidecar files"
+                    : "Remove embedded lyrics and clear this song’s lyrics in Still Music")
         } label: {
             Text("Lyrics actions")
         }
@@ -63,7 +77,10 @@ struct LyricsView: View {
             } else if model.lyrics.isEmpty {
                 Text("No lyrics found").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if model.lyrics.lines.isEmpty {
-                ScrollView { Text(model.lyrics.plainText).font(.system(size: 28)).lineSpacing(10).multilineTextAlignment(.center).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .center) }
+                ScrollView {
+                    Text(model.lyrics.plainText).font(.system(size: 28)).lineSpacing(10).multilineTextAlignment(.center)
+                        .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .center)
+                }
             } else {
                 ScrollViewReader { proxy in
                     GeometryReader { geometry in
@@ -71,16 +88,24 @@ struct LyricsView: View {
                             LazyVStack(alignment: .center, spacing: 28) {
                                 ForEach(model.lyrics.lines.indices, id: \.self) { index in
                                     let line = model.lyrics.lines[index]
-                                    Button { model.seek(to: line.time); following = true } label: {
+                                    Button {
+                                        model.seek(to: line.time)
+                                        following = true
+                                    } label: {
                                         Text(line.text.isEmpty ? " " : line.text)
                                             // Keep wrapping and row heights stable as the highlighted line changes.
                                             .font(.system(size: 34, weight: .semibold))
                                             .multilineTextAlignment(.center)
                                             .lineSpacing(8)
-                                            .foregroundStyle(index == currentLine ? Color.primary : Color.secondary.opacity(0.65))
+                                            .foregroundStyle(
+                                                index == currentLine ? Color.primary : Color.secondary.opacity(0.65)
+                                            )
                                             .frame(maxWidth: .infinity, alignment: .center)
                                             .scaleEffect(index == currentLine || reduceMotion ? 1 : 0.94)
-                                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: index == currentLine)
+                                            .animation(
+                                                reduceMotion ? nil : .easeInOut(duration: 0.25),
+                                                value: index == currentLine
+                                            )
                                             .contentShape(Rectangle())
                                     }.buttonStyle(.plain).id(index)
                                 }
@@ -138,13 +163,21 @@ private struct LyricsScrollObserver: NSViewRepresentable {
         private var monitor: Any?
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+                self.monitor = nil
+            }
             guard window != nil else { return }
-            monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .leftMouseDragged, .keyDown]) { [weak self] event in
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .leftMouseDragged, .keyDown]) {
+                [weak self] event in
                 guard let self, event.window === self.window else { return event }
                 if event.type == .keyDown {
-                    if [UInt16(116), 121, 125, 126].contains(event.keyCode), self.window?.firstResponder is NSView { self.onScroll?() }
-                } else if self.bounds.contains(self.convert(event.locationInWindow, from: nil)) { self.onScroll?() }
+                    if [UInt16(116), 121, 125, 126].contains(event.keyCode), self.window?.firstResponder is NSView {
+                        self.onScroll?()
+                    }
+                } else if self.bounds.contains(self.convert(event.locationInWindow, from: nil)) {
+                    self.onScroll?()
+                }
                 return event
             }
         }

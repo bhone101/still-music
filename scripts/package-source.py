@@ -14,7 +14,7 @@ ROOT_FILES = {
 SOURCE_DIRS = {".github", "Docs", "Resources", "Sources", "Tests", "Vendor"}
 SCRIPTS = {
     "build-app.sh", "build-taglib.sh", "build-dmg.sh", "check.sh", "make-icon.swift",
-    "package-source.sh", "package-source.py",
+    "package-source.sh", "package-source.py", "build-decoder.sh", "notarize-release.sh",
 }
 PRIVATE_SUFFIXES = {".p12", ".pfx", ".key", ".pem", ".jks", ".keystore", ".mobileprovision"}
 EXCLUDED_PARTS = {".git", ".build", "build", ".swiftpm", ".android-tools", "android", "__pycache__", "xcuserdata"}

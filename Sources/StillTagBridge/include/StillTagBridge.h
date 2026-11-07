@@ -4,6 +4,9 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+int still_read_property(const char *path, const char *key, char *value, size_t capacity);
+int still_write_property(const char *path, const char *key, const char *value);
+int still_write_artwork(const char *path, const char *format, const unsigned char *bytes, size_t size, int png);
 // Edits a disposable copy only. NULL lyrics removes all supported lyric tags.
 int still_write_lyrics(const char *path, const char *format, const char *lyrics,
                       char *error, size_t error_capacity);

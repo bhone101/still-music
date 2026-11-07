@@ -1,5 +1,7 @@
 # Development and release preparation
 
+See the [source guide](SourceMap.md) for file responsibilities and the shared Swift formatting command.
+
 ## Layout
 
 | Path | Responsibility |
@@ -58,3 +60,17 @@ To publish a version, wait for both jobs on the intended commit to pass, downloa
 - Confirm source, license texts and version metadata accompany the release.
 - Decide whether to provide architecture-specific builds or a separately validated universal build.
 - Configure Developer ID signing/notarization separately if offering trusted public downloads. Never commit private keys or signing credentials.
+
+## Signed and notarized releases
+
+`bash scripts/notarize-release.sh` runs checks, builds with hardened runtime and secure timestamps, signs the bundled decoder and app, submits the app to Apple, verifies Accepted status, staples and validates the ticket, assesses Gatekeeper, then creates, signs, notarizes and staples the DMG. Its final checksum is generated after stapling. It does not publish or upload a GitHub release.
+
+Set `STILL_SIGN_IDENTITY` to an installed **Developer ID Application** identity (or its SHA-1) and `STILL_NOTARY_PROFILE` to credentials previously stored with `xcrun notarytool store-credentials`. Keep credentials in Keychain; do not put secrets in source or shell scripts. A valid Apple Developer account/certificate is required. Ordinary builds remain ad-hoc signed when the identity is unset. No valid signing identities were available during the 0.2.0 implementation, so Apple notarization has not been performed.
+
+The decoder is compiled offline from the pinned FFmpeg source archive, with only the local Ogg/APE/WavPack demuxers, Opus/Vorbis/APE/WavPack decoders and float PCM pipe output (CAF is enabled for reference tests). Inspect `.build/decoder/configure.log` and `build.log` for diagnostics. The app ships the complete source archive, build instructions and LGPL license alongside the executable.
+
+## Performance safeguards
+
+Library persistence uses a serial utility writer and a separate position checkpoint. Browsing results are cached until their inputs change; only progress and synced lyrics observe the playback clock. Batch tag edits publish one library update, and artwork mappings reuse unchanged album keys.
+
+Extra codecs stream through a bounded pipe with four scheduled 16,384-frame buffers and one pending read. One successor may hold a prefetched buffer. Decoder cancellation terminates the child process, with a forced-stop fallback; a 15-second read timeout handles stalls. Tests compare decoded and engine-rendered samples to reference CAF output, check seeks/cancellation, and verify that position checkpoints do not rewrite the library.

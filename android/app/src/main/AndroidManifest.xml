@@ -1,0 +1,26 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <application android:label="Still Music" android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:theme="@style/Theme.StillMusic" android:supportsRtl="true">
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc" />
+        <receiver android:name="androidx.media3.session.MediaButtonReceiver" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.MEDIA_BUTTON" /></intent-filter>
+        </receiver>
+        <receiver android:name=".PlaybackWidget" android:exported="false">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/playback_widget" />
+        </receiver>
+        <service android:name=".PlaybackService" android:foregroundServiceType="mediaPlayback" android:exported="true">
+            <intent-filter><action android:name="androidx.media3.session.MediaLibraryService" /><action android:name="androidx.media3.session.MediaSessionService" /><action android:name="android.media.browse.MediaBrowserService" /><action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" /></intent-filter>
+        </service>
+    </application>
+</manifest>

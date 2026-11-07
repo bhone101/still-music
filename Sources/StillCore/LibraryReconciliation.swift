@@ -15,10 +15,16 @@ public enum LibraryReconciliation {
         let track: Int?
         let disc: Int?
         init(_ value: Track) {
-            title = value.title; artist = value.artist; album = value.album
-            albumArtist = value.albumArtist; duration = value.duration
-            sampleRate = value.sampleRate; bitDepth = value.bitDepth; codec = value.codec
-            track = value.trackNumber; disc = value.discNumber
+            title = value.title
+            artist = value.artist
+            album = value.album
+            albumArtist = value.albumArtist
+            duration = value.duration
+            sampleRate = value.sampleRate
+            bitDepth = value.bitDepth
+            codec = value.codec
+            track = value.trackNumber
+            disc = value.discNumber
         }
     }
     private enum Availability { case present, missing, unavailable }
@@ -36,7 +42,8 @@ public enum LibraryReconciliation {
         } catch {
             let error = error as NSError
             guard error.domain == NSCocoaErrorDomain,
-                  [NSFileReadNoSuchFileError, NSFileNoSuchFileError].contains(error.code) else { return .unavailable }
+                [NSFileReadNoSuchFileError, NSFileNoSuchFileError].contains(error.code)
+            else { return .unavailable }
             return .missing
         }
     }

@@ -22,7 +22,11 @@ STAGING=$(mktemp -d "$PWD/build/dmg-stage.XXXXXX")
 trap 'rm -rf "$STAGING"' EXIT
 ditto "$APP" "$STAGING/Still Music.app"
 ln -s /Applications "$STAGING/Applications"
-cp Resources/Install.txt "$STAGING/Read Me.txt"
+if xcrun stapler validate "$APP" >/dev/null 2>&1; then
+    printf 'Drag Still Music into Applications, then open it. This release is Developer ID signed and notarized by Apple.\n' > "$STAGING/Read Me.txt"
+else
+    cp Resources/Install.txt "$STAGING/Read Me.txt"
+fi
 DMG="$PWD/build/Still-Music-$VERSION-$ARCH.dmg"
 hdiutil create -volname 'Still Music' -srcfolder "$STAGING" -format UDZO -fs HFS+ -ov "$DMG"
 hdiutil verify "$DMG"

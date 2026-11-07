@@ -1,0 +1,6 @@
+<resources>
+    <string name="widget_name">Still Music</string>
+    <string name="widget_previous">Previous song</string>
+    <string name="widget_next">Next song</string>
+    <string name="widget_play">Play</string>
+</resources>

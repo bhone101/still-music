@@ -10,9 +10,10 @@ struct StillMusicApp: App {
         Window("Still Music", id: "main") {
             ContentView(model: model)
                 .onAppear { appDelegate.model = model }
-                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in model.rescanFoldersIfNeeded() }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                    model.rescanFoldersIfNeeded()
+                }
                 .onOpenURL { model.add([$0]) }
-                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in model.save() }
         }
         .defaultSize(width: 1120, height: 720)
         .windowStyle(.hiddenTitleBar)
@@ -21,6 +22,8 @@ struct StillMusicApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("Add Music…") { model.chooseFiles() }.keyboardShortcut("o")
                     .disabled(model.importing)
+                Button("Edit Song Info…") { model.editSongInfo(model.selectedSongs) }.disabled(
+                    model.selectedSongs.isEmpty || model.editingMetadata)
                 Button("Refresh Song Metadata") { model.refreshMetadata() }
                     .disabled(model.refreshing || model.tracks.isEmpty)
             }
@@ -40,11 +43,31 @@ struct StillMusicApp: App {
 final class StillMusicAppDelegate: NSObject, NSApplicationDelegate {
     weak var model: PlayerModel?
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(styleSongDeletionMenu(_:)),
+            name: NSMenu.didBeginTrackingNotification, object: nil)
         // Load the bundled artwork directly, including after in-place development updates.
         if let url = Bundle.main.url(forResource: "StillRing", withExtension: "icns"),
-           let icon = NSImage(contentsOf: url) {
+            let icon = NSImage(contentsOf: url)
+        {
             NSApp.applicationIconImage = icon
         }
+    }
+    @objc private func styleSongDeletionMenu(_ notification: Notification) {
+        guard let menu = notification.object as? NSMenu else { return }
+        // Native macOS menus can discard SwiftUI foreground styles and destructive roles.
+        // Apply the semantic color to the native title for both song action menus.
+        func style(_ menu: NSMenu) {
+            for item in menu.items {
+                if item.title == "Delete Song…" {
+                    item.attributedTitle = NSAttributedString(
+                        string: item.title,
+                        attributes: [.foregroundColor: item.isEnabled ? NSColor.systemRed : NSColor.disabledControlTextColor])
+                }
+                if let submenu = item.submenu { style(submenu) }
+            }
+        }
+        style(menu)
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let model else { return .terminateNow }

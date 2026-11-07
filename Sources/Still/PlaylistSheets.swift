@@ -6,7 +6,7 @@ private typealias PlaylistState<Value> = SwiftUI.State<Value>
 struct PlaylistNameSheet: View {
     @ObservedObject var model: PlayerModel
     let playlist: MusicPlaylist?
-    let track: Track?
+    let tracks: [Track]
     @Environment(\.dismiss) private var dismiss
     @PlaylistState private var name = ""
     @PlaylistState private var error: String?
@@ -25,11 +25,16 @@ struct PlaylistNameSheet: View {
                     .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }.padding(24).frame(width: 360)
-            .onAppear { name = playlist?.name ?? ""; focused = true }
+            .onAppear {
+                name = playlist?.name ?? ""
+                focused = true
+            }
     }
     private func save() {
-        do { try model.editPlaylistName(name, id: playlist?.id, adding: track); dismiss() }
-        catch { self.error = error.localizedDescription }
+        do {
+            try model.editPlaylistName(name, id: playlist?.id, adding: tracks)
+            dismiss()
+        } catch { self.error = error.localizedDescription }
     }
 }
 
@@ -45,8 +50,16 @@ struct PlaylistSongsSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Songs in \(playlist.name)").font(.title2.weight(.semibold)).lineLimit(1)
             TextField("Find songs", text: $search).textFieldStyle(.roundedBorder)
-            List(model.tracks.filter { search.isEmpty || "\($0.title) \($0.artist) \($0.album)".localizedCaseInsensitiveContains(search) }) { track in
-                Toggle(isOn: Binding(get: { selected.contains(track.id) }, set: { if $0 { selected.insert(track.id) } else { selected.remove(track.id) } })) {
+            List(
+                model.tracks.filter {
+                    search.isEmpty || "\($0.title) \($0.artist) \($0.album)".localizedCaseInsensitiveContains(search)
+                }
+            ) { track in
+                Toggle(
+                    isOn: Binding(
+                        get: { selected.contains(track.id) },
+                        set: { if $0 { selected.insert(track.id) } else { selected.remove(track.id) } })
+                ) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(track.title).lineLimit(1)
                         Text(track.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -60,8 +73,10 @@ struct PlaylistSongsSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Done") {
-                    do { try model.updatePlaylistSongs(playlist.id, selected: selected); dismiss() }
-                    catch { self.error = error.localizedDescription }
+                    do {
+                        try model.updatePlaylistSongs(playlist.id, selected: selected)
+                        dismiss()
+                    } catch { self.error = error.localizedDescription }
                 }.keyboardShortcut(.defaultAction)
             }
         }.padding(24).frame(width: 480, height: 480)

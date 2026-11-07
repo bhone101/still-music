@@ -17,11 +17,296 @@ final class AudioTests {
     }
 
     func exportUIFixtures() throws {
-        let target = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(".build/metadata-fixtures")
+        let target = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(
+            ".build/metadata-fixtures")
         try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
         for name in ["Tagged one.flac", "Tagged two.flac", "Native tags.m4a"] {
-            try Data(contentsOf: directory.appendingPathComponent(name)).write(to: target.appendingPathComponent(name), options: .atomic)
+            try Data(contentsOf: directory.appendingPathComponent(name)).write(
+                to: target.appendingPathComponent(name), options: .atomic)
         }
+    }
+
+    func testOnRepeat() throws {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        var history = ListeningHistory()
+        history.record("old", at: now.addingTimeInterval(-31 * 86400))
+        history.record("a", at: now.addingTimeInterval(-100))
+        history.record("a", at: now.addingTimeInterval(-50))
+        history.record("b", at: now.addingTimeInterval(-10))
+        history.record("removed", at: now)
+        XCTAssertEqual(history.rankedIDs(available: ["old", "a", "b"], at: now), ["a", "b"])
+        XCTAssertEqual(history.rankedIDs(available: ["a", "b"], at: now.addingTimeInterval(31 * 86400)), [])
+        history.reconcilePaths(["a": "moved"])
+        XCTAssertEqual(history.rankedIDs(available: ["moved", "b"], at: now, limit: 1), ["moved"])
+        let snapshot = LibrarySnapshot(listeningHistory: history)
+        let restored = try JSONDecoder().decode(LibrarySnapshot.self, from: JSONEncoder().encode(snapshot))
+        XCTAssertEqual(restored.listeningHistory?.rankedIDs(available: ["moved", "b"], at: now), ["moved", "b"])
+        let legacy = Data(#"{"tracks":[],"position":0,"volume":1}"#.utf8)
+        XCTAssertTrue(try JSONDecoder().decode(LibrarySnapshot.self, from: legacy).listeningHistory == nil)
+        var many = ListeningHistory()
+        for index in 0..<40 { many.record(String(index), at: now) }
+        XCTAssertEqual(many.rankedIDs(available: Set((0..<40).map(String.init)), at: now).count, 30)
+
+        var session = ListenSession()
+        var qualified = 0
+        for second in 0...40 {
+            if session.observe(position: Double(second), duration: 180, playing: true, uptime: Double(second)) {
+                qualified += 1
+            }
+        }
+        XCTAssertEqual(qualified, 1)
+        session.reset()
+        XCTAssertTrue(!session.observe(position: 0, duration: 180, playing: true, uptime: 0))
+        XCTAssertTrue(!session.observe(position: 100, duration: 180, playing: true, uptime: 1))  // seek
+        XCTAssertTrue(!session.observe(position: 100, duration: 180, playing: false, uptime: 100))  // pause
+        XCTAssertTrue(!session.observe(position: 100, duration: 180, playing: true, uptime: 101))
+        for second in 1...29 {
+            XCTAssertTrue(
+                !session.observe(
+                    position: Double(100 + second), duration: 180, playing: true, uptime: Double(101 + second)))
+        }
+        XCTAssertTrue(session.observe(position: 130, duration: 180, playing: true, uptime: 131))
+        session.reset()
+        for second in 0..<5 {
+            XCTAssertTrue(
+                !session.observe(position: Double(second), duration: 10, playing: true, uptime: Double(second)))
+        }
+        XCTAssertTrue(session.observe(position: 5, duration: 10, playing: true, uptime: 5))
+    }
+
+    func testSongFileDeletion() throws {
+        let song = directory.appendingPathComponent("delete this song.wav")
+        let neighbor = directory.appendingPathComponent("keep this song.wav")
+        let bytes = Data([1, 2, 3, 4])
+        try bytes.write(to: song)
+        try bytes.write(to: neighbor)
+        try SongFileDeletion.delete(song)
+        XCTAssertTrue(!FileManager.default.fileExists(atPath: song.path))
+        XCTAssertEqual(try Data(contentsOf: neighbor), bytes)
+        do {
+            try SongFileDeletion.delete(song)
+            XCTAssertEqual(true, false, "Missing files must report failure")
+        } catch {}
+        do {
+            try SongFileDeletion.delete(directory)
+            XCTAssertEqual(true, false, "Directories must never be deleted")
+        } catch {}
+        XCTAssertEqual(try Data(contentsOf: neighbor), bytes)
+        let link = directory.appendingPathComponent("linked song.wav")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: neighbor)
+        do {
+            try SongFileDeletion.delete(link)
+            XCTAssertEqual(true, false, "Symbolic links must not delete another file")
+        } catch {}
+        XCTAssertEqual(try Data(contentsOf: neighbor), bytes)
+
+        var queue = PlaybackQueue()
+        queue.reset(["keep", "deleted", "deleted", "last"], startingAt: "keep")
+        queue.toggleShuffle()
+        queue.remove("deleted")
+        XCTAssertTrue(queue.items.allSatisfy { $0.trackID != "deleted" })
+        XCTAssertEqual(queue.current?.trackID, "keep")
+        queue.toggleShuffle()
+        XCTAssertEqual(queue.items.map(\.trackID), ["keep", "last"])
+    }
+
+    func testPersistentQueue() throws {
+        var queue = PlaybackQueue()
+        queue.reset(["a", "b", "a", "c"], startingAt: "a")
+        queue.enqueue("b", next: true)
+        queue.toggleShuffle()
+        let decoded = try JSONDecoder().decode(PlaybackQueue.self, from: JSONEncoder().encode(queue))
+        XCTAssertEqual(decoded.items, queue.items)
+        XCTAssertEqual(decoded.currentIndex, queue.currentIndex)
+        XCTAssertEqual(decoded.isShuffled, true)
+        var restored = decoded
+        queue.toggleShuffle()
+        restored.toggleShuffle()
+        XCTAssertEqual(restored.items, queue.items)
+        // Old saved loop state must not restore repeat behavior.
+        var legacy = try JSONSerialization.jsonObject(with: JSONEncoder().encode(queue)) as! [String: Any]
+        legacy["isLooping"] = true
+        var migrated = try JSONDecoder().decode(
+            PlaybackQueue.self, from: JSONSerialization.data(withJSONObject: legacy))
+        while migrated.hasNext { _ = migrated.advance() }
+        XCTAssertEqual(migrated.advance(), nil)
+    }
+
+    func testBackgroundPersistence() async throws {
+        let url = directory.appendingPathComponent("checkpoint-library.json")
+        let writer = LibraryPersistence(url: url)
+        writer.submit(
+            library: LibrarySnapshot(currentID: "first"), position: PlaybackPosition(currentID: "first", position: 1))
+        await writer.flush()
+        let before = try Data(contentsOf: url)
+        let modified = try url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        for position in 2...50 {
+            writer.submit(library: nil, position: PlaybackPosition(currentID: "first", position: Double(position)))
+        }
+        await writer.flush()
+        XCTAssertEqual(try Data(contentsOf: url), before)
+        XCTAssertEqual(try url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, modified)
+        XCTAssertEqual(try PlaybackPosition.load(beside: url)?.position, 50)
+        writer.submit(
+            library: LibrarySnapshot(currentID: "second"), position: PlaybackPosition(currentID: "second", position: 0))
+        writer.submit(library: nil, position: PlaybackPosition(currentID: "second", position: 12))
+        await writer.flush()
+        XCTAssertEqual(try LibraryStorage.load(from: url).currentID, "second")
+        XCTAssertEqual(try PlaybackPosition.load(beside: url)?.currentID, "second")
+        XCTAssertEqual(try PlaybackPosition.load(beside: url)?.position, 12)
+    }
+
+    func testTagAndArtworkEdits() async throws {
+        let flac = try makeTaggedFLAC(
+            name: "Metadata editing",
+            tags: ["TITLE=Original", "ARTIST=Keep artist", "LYRICS=Keep lyrics", "COMMENT=Keep comment"])
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Vendor/taglib-2.2.1/tests/data/lame_cbr.mp3")
+        let mp3 = directory.appendingPathComponent("Metadata editing.mp3")
+        try FileManager.default.copyItem(at: fixture, to: mp3)
+        let m4a = directory.appendingPathComponent("Native tags.m4a")
+        func samples(_ url: URL) throws -> Data {
+            let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
+            let buffer = try XCTUnwrap(
+                AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)))
+            try file.read(into: buffer)
+            var result = Data()
+            for channel in 0..<Int(buffer.format.channelCount) {
+                result.append(Data(bytes: buffer.floatChannelData![channel], count: Int(buffer.frameLength) * 4))
+            }
+            return result
+        }
+        let image = try makeCover(red: 200)
+        for url in [flac, mp3, m4a] {
+            let before = try samples(url)
+            let artist = FileMetadata.read("ARTIST", from: url)
+            try FileMetadata.write(
+                [
+                    "TITLE": "မြန်မာ café", "ALBUMARTIST": "Various Artists", "TRACKNUMBER": "3", "DISCNUMBER": "2",
+                    "DATE": "2026",
+                ], to: url)
+            let track = try await Track.read(url)
+            XCTAssertEqual(track.title, "မြန်မာ café")
+            XCTAssertEqual(track.albumArtist, "Various Artists")
+            XCTAssertEqual(track.trackNumber, 3)
+            XCTAssertEqual(track.discNumber, 2)
+            XCTAssertEqual(track.year, 2026)
+            XCTAssertEqual(FileMetadata.read("ARTIST", from: url), artist)
+            try FileMetadata.writeArtwork(image, to: url)
+            XCTAssertEqual(await Track.artwork(for: url), image)
+            XCTAssertEqual(try samples(url), before, "Metadata and artwork edits preserve decoded samples")
+            try FileMetadata.write(["ALBUMARTIST": ""], to: url)
+            XCTAssertEqual(FileMetadata.read("ALBUMARTIST", from: url), nil)
+            let saved = try Data(contentsOf: url)
+            do {
+                try FileMetadata.write(["TRACKNUMBER": "bad"], to: url)
+                XCTAssertTrue(false)
+            } catch {}
+            do {
+                try FileMetadata.writeArtwork(Data("bad".utf8), to: url)
+                XCTAssertTrue(false)
+            } catch {}
+            XCTAssertEqual(try Data(contentsOf: url), saved)
+            try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url.path)
+            do {
+                try FileMetadata.write(["TITLE": "Bad"], to: url)
+                XCTAssertTrue(false)
+            } catch {}
+            XCTAssertEqual(try Data(contentsOf: url), saved)
+            try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+        }
+        XCTAssertEqual(FileMetadata.read("COMMENT", from: flac), "Keep comment")
+        XCTAssertEqual(FileMetadata.read("LYRICS", from: flac), "Keep lyrics")
+    }
+
+    @MainActor func testExtendedCodecs() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Vendor/taglib-2.2.1/tests/data")
+        for name in ["correctness_gain_silent_output.opus", "test.ogg", "mac-399.ape", "click.wv"] {
+            let url = root.appendingPathComponent(name)
+            print("Checking extended codec: \(name)")
+            let track = try await Track.read(url)
+            XCTAssertGreaterThan(track.duration, 0)
+            // Independent CAF output verifies every frame from the bounded pipe.
+            let decoded = directory.appendingPathComponent(name + ".caf")
+            let reference = Process()
+            reference.executableURL = ExtendedAudio.executable
+            reference.arguments = [
+                "-nostdin", "-v", "error", "-y", "-i", url.path, "-c:a", "pcm_f32le", "-f", "caf", decoded.path,
+            ]
+            try reference.run()
+            reference.waitUntilExit()
+            XCTAssertEqual(reference.terminationStatus, 0)
+            let file = try AVAudioFile(forReading: decoded)
+            XCTAssertGreaterThan(file.length, 0)
+            XCTAssertEqual(file.processingFormat.sampleRate, track.sampleRate)
+            let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 1024))
+            try file.read(into: buffer)
+            XCTAssertGreaterThan(buffer.frameLength, 0)
+            let decoder = try StreamingAudio(source: url)
+            file.framePosition = 0
+            var frames: Int64 = 0
+            while let chunk = try await decoder.read() {
+                XCTAssertEqual(chunk.frameLength <= 16384, true)
+                let expected = try XCTUnwrap(
+                    AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: chunk.frameLength))
+                try file.read(into: expected)
+                XCTAssertEqual(expected.frameLength, chunk.frameLength)
+                for channel in 0..<Int(chunk.format.channelCount) {
+                    XCTAssertEqual(
+                        Data(bytes: chunk.floatChannelData![channel], count: Int(chunk.frameLength) * 4),
+                        Data(bytes: expected.floatChannelData![channel], count: Int(expected.frameLength) * 4))
+                }
+                frames += Int64(chunk.frameLength)
+            }
+            XCTAssertEqual(frames, file.length)
+            decoder.cancel()
+            let playbackDecoder = try StreamingAudio(source: url)
+            let warmBuffer = try await playbackDecoder.read()
+            let engine = AVAudioEngine()
+            try engine.enableManualRenderingMode(.offline, format: playbackDecoder.format, maximumFrameCount: 512)
+            let playback = try StreamPlayback(
+                decoder: playbackDecoder, first: warmBuffer, duration: track.duration, engine: engine)
+            var completed = 0
+            var failed = false
+            playback.onCompletion = { completed += 1 }
+            playback.onFailure = { _ in failed = true }
+            try await playback.play(from: 0)
+            file.framePosition = 0
+            let rendered = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: engine.manualRenderingFormat, frameCapacity: 512))
+            let expectedRender = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 512))
+            while file.framePosition < file.length {
+                let count = AVAudioFrameCount(min(512, file.length - file.framePosition))
+                XCTAssertEqual(try engine.renderOffline(count, to: rendered), .success)
+                try file.read(into: expectedRender, frameCount: count)
+                for channel in 0..<Int(rendered.format.channelCount) {
+                    XCTAssertEqual(
+                        Data(bytes: rendered.floatChannelData![channel], count: Int(count) * 4),
+                        Data(bytes: expectedRender.floatChannelData![channel], count: Int(count) * 4),
+                        "Stream scheduling preserves audio without gaps")
+                }
+                try await Task.sleep(nanoseconds: 1_000_000)
+            }
+            for _ in 0..<20 where completed == 0 {
+                _ = try engine.renderOffline(512, to: rendered)
+                try await Task.sleep(nanoseconds: 1_000_000)
+            }
+            XCTAssertEqual(completed, 1)
+            XCTAssertEqual(failed, false)
+            await playback.fadeOutAndStop()
+            XCTAssertEqual(engine.isRunning, false)
+            let cancelled = try StreamingAudio(source: url)
+            cancelled.cancel()
+            do {
+                _ = try await cancelled.read()
+                XCTAssertEqual(false, true, "Cancelled decoder returned audio")
+            } catch is CancellationError {}
+            let seekTime = min(0.1, track.duration / 4)
+            let seeking = try StreamingAudio(source: url, seconds: seekTime)
+            XCTAssertGreaterThan(try await seeking.read()?.frameLength ?? 0, 0)
+            seeking.cancel()
+        }
+
     }
 
     func testWatchedFolders() async throws {
@@ -45,11 +330,16 @@ final class AudioTests {
         try FileManager.default.moveItem(at: makeWAV(name: "ScanSecond"), to: second)
         let added = await LibraryImporter.scan(watched.urls, excluding: ids)
         XCTAssertEqual(added.tracks.count, 1)
-        watched.ignoredTrackIDs = ids
-        try watched.save(to: stateURL)
+        // Legacy deletion exclusions are ignored, allowing Scan to restore missing library entries.
+        let legacy: [String: Any] = ["paths": Array(watched.paths), "ignoredTrackIDs": Array(ids)]
+        try JSONSerialization.data(withJSONObject: legacy).write(to: stateURL)
         watched = try WatchedFolders.load(from: stateURL)
-        let remaining = Set(added.tracks.map(\.id)).union(watched.ignoredTrackIDs)
-        XCTAssertEqual((await LibraryImporter.scan(watched.urls, excluding: remaining)).tracks.count, 0)
+        let remaining = Set(added.tracks.map(\.id))
+        let recovered = await LibraryImporter.scan(watched.urls, excluding: remaining)
+        XCTAssertEqual(Set(recovered.tracks.map(\.id)), ids)
+        try watched.save(to: stateURL)
+        let saved = try JSONSerialization.jsonObject(with: Data(contentsOf: stateURL)) as! [String: Any]
+        XCTAssertTrue(saved["ignoredTrackIDs"] == nil)
         try FileManager.default.moveItem(at: folder, to: directory.appendingPathComponent("Offline"))
         XCTAssertEqual((await LibraryImporter.scan(watched.urls, excluding: remaining)).tracks.count, 0)
     }
@@ -117,6 +407,101 @@ final class AudioTests {
         XCTAssertEqual(engine.isRunning, false)
     }
 
+    @MainActor func testEqualizer() async throws {
+        let settings = EqualizerSettings(enabled: true, gains: [99, -99, .nan])
+        XCTAssertEqual(settings.gains.count, 10)
+        XCTAssertEqual(settings.gains[0], 12)
+        XCTAssertEqual(settings.gains[1], -12)
+        XCTAssertEqual(settings.gains[2], 0)
+        XCTAssertEqual(settings.preamp, -12)
+        let legacy = Data(#"{"enabled":true,"gains":[4,0,0,0,0,0,0,0,0,0]}"#.utf8)
+        let migrated = try JSONDecoder().decode(EqualizerSettings.self, from: legacy)
+        XCTAssertTrue(migrated.automaticPreamp)
+        XCTAssertEqual(migrated.preamp, -4)
+        let manual = EqualizerSettings(enabled: true, gains: EqualizerPreset.shaped.gains, automaticPreamp: false, manualPreamp: -7)
+        XCTAssertEqual(manual.preamp, -7)
+        XCTAssertEqual(EqualizerSettings(automaticPreamp: false, manualPreamp: 99).preamp, 12)
+        let suiteName = "StillEQTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(try JSONEncoder().encode(manual), forKey: "StillEqualizer")
+        let restored = try JSONDecoder().decode(EqualizerSettings.self, from: XCTUnwrap(defaults.data(forKey: "StillEqualizer")))
+        XCTAssertEqual(restored, manual)
+        XCTAssertEqual(restored.gains, EqualizerPreset.shaped.gains)
+        XCTAssertEqual(try JSONDecoder().decode(EqualizerSettings.self, from: JSONEncoder().encode(settings)), settings)
+        let url = try makeWAV(name: "Equalizer", rate: 48000, bits: 24)
+        var dryEnergy: Float = 0
+        for enabled in [false, true] {
+            let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
+            let engine = AVAudioEngine()
+            try engine.enableManualRenderingMode(.offline, format: file.processingFormat, maximumFrameCount: 512)
+            let player = try EnginePlayback(file: file, engine: engine,
+                equalizer: EqualizerSettings(enabled: enabled, gains: Array(repeating: -6, count: 10)))
+            let units = engine.attachedNodes.compactMap { $0 as? AVAudioUnitEQ }
+            XCTAssertEqual(units.count, enabled ? 1 : 0)
+            if let eq = units.first { XCTAssertEqual(eq.bands.count, 10) }
+            try player.play(from: 0)
+            let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: engine.manualRenderingFormat, frameCapacity: 512))
+            XCTAssertEqual(try engine.renderOffline(512, to: buffer), .success)
+            for channel in 0..<Int(buffer.format.channelCount) {
+                let samples = try XCTUnwrap(buffer.floatChannelData?[channel])
+                XCTAssertTrue((0..<Int(buffer.frameLength)).allSatisfy { samples[$0].isFinite })
+            }
+            let samples = try XCTUnwrap(buffer.floatChannelData?[0])
+            let energy = (0..<Int(buffer.frameLength)).reduce(Float(0)) { $0 + samples[$1] * samples[$1] }
+            if enabled { XCTAssertTrue(energy < dryEnergy) } else { dryEnergy = energy; XCTAssertTrue(energy > 0) }
+            let position = engine.manualRenderingSampleTime
+            XCTAssertEqual(player.updateEqualizer(EqualizerSettings(enabled: true, gains: EqualizerPreset.bass.gains)), enabled)
+            XCTAssertEqual(engine.manualRenderingSampleTime, position)
+            XCTAssertTrue(engine.isRunning)
+            if let eq = units.first {
+                XCTAssertEqual(eq.bands[0].gain, 4)
+                XCTAssertEqual(eq.globalGain, -4)
+                XCTAssertEqual(try engine.renderOffline(512, to: buffer), .success)
+                XCTAssertTrue(engine.manualRenderingSampleTime > position)
+            }
+            XCTAssertEqual(player.updateEqualizer(EqualizerSettings(enabled: false)), false)
+            player.stop()
+        }
+    }
+
+    @MainActor func testEqualizerTransparency() throws {
+        // Flat enabled EQ must preserve decoded samples as well as disabled EQ.
+        for rate in [44100, 48000, 96000, 192000] {
+            for bits in [16, 24] {
+                let url = try makeWAV(name: "EQTransparent-\(rate)-\(bits)", rate: rate, bits: bits)
+                for enabled in [false, true] {
+                    let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
+                    let reference = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 512))
+                    try file.read(into: reference)
+                    file.framePosition = 0
+                    let engine = AVAudioEngine()
+                    try engine.enableManualRenderingMode(.offline, format: file.processingFormat, maximumFrameCount: 512)
+                    let player = try EnginePlayback(file: file, engine: engine, equalizer: EqualizerSettings(enabled: enabled))
+                    XCTAssertEqual(player.outputRate, Double(rate))
+                    if enabled {
+                        let eq = try XCTUnwrap(engine.attachedNodes.compactMap { $0 as? AVAudioUnitEQ }.first)
+                        XCTAssertEqual(eq.inputFormat(forBus: 0).sampleRate, Double(rate))
+                        XCTAssertEqual(eq.outputFormat(forBus: 0).sampleRate, Double(rate))
+                        XCTAssertTrue(eq.bands.allSatisfy { $0.bypass })
+                        XCTAssertEqual(eq.globalGain, 0)
+                    }
+                    try player.play(from: 0)
+                    let rendered = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: engine.manualRenderingFormat, frameCapacity: 512))
+                    XCTAssertEqual(try engine.renderOffline(512, to: rendered), .success)
+                    XCTAssertEqual(rendered.frameLength, reference.frameLength)
+                    for channel in 0..<Int(reference.format.channelCount) {
+                        for frame in 0..<Int(reference.frameLength) {
+                            XCTAssertEqual(rendered.floatChannelData![channel][frame], reference.floatChannelData![channel][frame])
+                        }
+                    }
+                    player.stop()
+                }
+                print("Verified EQ off and flat: \(rate) Hz / \(bits)-bit, exact decoded PCM")
+            }
+        }
+    }
+
     @MainActor func testGaplessOutput() async throws {
         for rate in [44100, 48000, 96000, 192000] {
             for bits in [16, 24] {
@@ -132,7 +517,8 @@ final class AudioTests {
                         let convert = Process()
                         convert.executableURL = URL(fileURLWithPath: "/usr/bin/afconvert")
                         convert.arguments = [source.path, destination.path, "-f", "flac", "-d", "flac"]
-                        try convert.run(); convert.waitUntilExit()
+                        try convert.run()
+                        convert.waitUntilExit()
                         XCTAssertEqual(convert.terminationStatus, 0)
                         return destination
                     }
@@ -144,10 +530,14 @@ final class AudioTests {
                 var reference: [[Float]] = [[], []]
                 for url in [firstURL, secondURL] {
                     let file = try open(url)
-                    let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)))
+                    let buffer = try XCTUnwrap(
+                        AVAudioPCMBuffer(
+                            pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)))
                     try file.read(into: buffer)
                     for channel in 0..<2 {
-                        reference[channel] += Array(UnsafeBufferPointer(start: buffer.floatChannelData![channel], count: Int(buffer.frameLength)))
+                        reference[channel] += Array(
+                            UnsafeBufferPointer(
+                                start: buffer.floatChannelData![channel], count: Int(buffer.frameLength)))
                     }
                 }
                 let successor = UUID()
@@ -156,25 +546,31 @@ final class AudioTests {
                 try player.play(from: 0)
                 XCTAssertEqual(player.preload(second, id: successor), true)
                 XCTAssertEqual(player.preload(second, id: successor), true)
-                let rendered = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: engine.manualRenderingFormat, frameCapacity: 512))
+                let rendered = try XCTUnwrap(
+                    AVAudioPCMBuffer(pcmFormat: engine.manualRenderingFormat, frameCapacity: 512))
                 var offset = 0, mismatches = 0
                 while offset < reference[0].count {
                     let count = min(512, reference[0].count - offset)
                     XCTAssertEqual(try engine.renderOffline(AVAudioFrameCount(count), to: rendered), .success)
                     for channel in 0..<2 {
                         for frame in 0..<count {
-                            if rendered.floatChannelData![channel][frame] != reference[channel][offset + frame] { mismatches += 1 }
+                            if rendered.floatChannelData![channel][frame] != reference[channel][offset + frame] {
+                                mismatches += 1
+                            }
                         }
                     }
                     offset += count
                 }
-                XCTAssertEqual(mismatches, 0, "\(rate) Hz / \(bits)-bit: all PCM samples across the track boundary must match")
+                XCTAssertEqual(
+                    mismatches, 0, "\(rate) Hz / \(bits)-bit: all PCM samples across the track boundary must match")
                 XCTAssertEqual(engine.isRunning, true)
                 // Let completion callbacks update metadata without driving the audio boundary.
                 for _ in 0..<20 where advanced.isEmpty { try await Task.sleep(nanoseconds: 5_000_000) }
                 XCTAssertEqual(advanced, [successor])
                 player.stop()
-                print("Verified offline output: \(rate) Hz / \(bits)-bit \(playbackURLs[0].pathExtension), seamless boundary, \(reference[0].count) frames")
+                print(
+                    "Verified offline output: \(rate) Hz / \(bits)-bit \(playbackURLs[0].pathExtension), seamless boundary, \(reference[0].count) frames"
+                )
             }
         }
         let first = try AVAudioFile(forReading: makeWAV(name: "SameRate", rate: 44100))
@@ -191,7 +587,8 @@ final class AudioTests {
         for rate in [44100.0, 96000, 192000] {
             for keepNext in [true, false] {
                 let urls = try [311.0, 523, 733, 997].enumerated().map { index, frequency in
-                    try makeWAV(name: "Queue-\(rate)-\(keepNext)-\(index)", rate: Int(rate), bits: 24, frequency: frequency)
+                    try makeWAV(
+                        name: "Queue-\(rate)-\(keepNext)-\(index)", rate: Int(rate), bits: 24, frequency: frequency)
                 }
                 func open(_ index: Int) throws -> AVAudioFile {
                     try AVAudioFile(forReading: urls[index], commonFormat: .pcmFormatFloat32, interleaved: false)
@@ -219,7 +616,9 @@ final class AudioTests {
                     let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: count))
                     try file.read(into: buffer)
                     for channel in 0..<2 {
-                        reference[channel] += Array(UnsafeBufferPointer(start: buffer.floatChannelData![channel], count: Int(buffer.frameLength)))
+                        reference[channel] += Array(
+                            UnsafeBufferPointer(
+                                start: buffer.floatChannelData![channel], count: Int(buffer.frameLength)))
                     }
                 }
                 let currentFrames = Int(first.length - startFrame)
@@ -243,7 +642,9 @@ final class AudioTests {
                     XCTAssertEqual(try engine.renderOffline(AVAudioFrameCount(count), to: rendered), .success)
                     for channel in 0..<2 {
                         for frame in 0..<count {
-                            if rendered.floatChannelData![channel][frame] != reference[channel][renderedCount + frame] { mismatches += 1 }
+                            if rendered.floatChannelData![channel][frame] != reference[channel][renderedCount + frame] {
+                                mismatches += 1
+                            }
                         }
                     }
                     renderedCount += count
@@ -265,8 +666,9 @@ final class AudioTests {
         let url = directory.appendingPathComponent("private-library.audio-diagnostics.json")
         let log = AudioDiagnostics(storageURL: url, capacity: 4)
         for _ in 0..<10 { log.record(.queueEdited) }
-        let secretError = NSError(domain: "/Users/private/Song.flac", code: -50,
-                                  userInfo: [NSLocalizedDescriptionKey: "Private song title /Users/private/Song.flac"])
+        let secretError = NSError(
+            domain: "/Users/private/Song.flac", code: -50,
+            userInfo: [NSLocalizedDescriptionKey: "Private song title /Users/private/Song.flac"])
         log.record(.playbackFailed, status: AudioDiagnostics.statusCode(secretError))
         log.record(.rateConfirmed, device: 42, sourceRate: 44100, outputRate: 44100)
         await log.flush()
@@ -286,7 +688,7 @@ final class AudioTests {
         try await rates.restore()
         XCTAssertEqual(restored.entries.last?.event, .rateRestored)
         hardware.fail = true
-        do { _ = try await rates.match(source: 44100, enabled: true) } catch { }
+        do { _ = try await rates.match(source: 44100, enabled: true) } catch {}
         XCTAssertEqual(restored.entries.last?.event, .rateFailed)
         await restored.flush()
         try Data("corrupt log".utf8).write(to: url)
@@ -310,7 +712,9 @@ final class AudioTests {
             }
             try await matching.restore()
             XCTAssertEqual(try hardware.rate(device), original)
-            print("Hardware original rate restored: \(original) Hz. This is rate verification, not a DAC sample-capture test.")
+            print(
+                "Hardware original rate restored: \(original) Hz. This is rate verification, not a DAC sample-capture test."
+            )
         } catch {
             try await matching.restore()
             throw error
@@ -319,7 +723,8 @@ final class AudioTests {
 
     @MainActor func testOutputSampleRates() async throws {
         XCTAssertEqual(SampleRatePolicy.preferred(source: 44100, ranges: [44100...44100, 88200...88200]), 44100)
-        XCTAssertEqual(SampleRatePolicy.preferred(source: 44100, ranges: [48000...48000, 176400...176400, 88200...88200]), 88200)
+        XCTAssertEqual(
+            SampleRatePolicy.preferred(source: 44100, ranges: [48000...48000, 176400...176400, 88200...88200]), 88200)
         XCTAssertEqual(SampleRatePolicy.preferred(source: 48000, ranges: [96000...192000]), 96000)
         XCTAssertEqual(SampleRatePolicy.preferred(source: 44100, ranges: [48000...48000]), nil)
         XCTAssertEqual(SampleRatePolicy.preferred(source: 0, ranges: [44100...192000]), nil)
@@ -328,7 +733,7 @@ final class AudioTests {
         let first = try await matching.match(source: 44100, enabled: true)
         XCTAssertEqual(first, 44100)
         _ = try await matching.match(source: 44100, enabled: true)
-        XCTAssertEqual(hardware.writes.count, 1) // Same-rate transitions do not touch the device.
+        XCTAssertEqual(hardware.writes.count, 1)  // Same-rate transitions do not touch the device.
         // A mid-song device reset must recover without fighting its new rate.
         hardware.rates[1] = 96000
         let recovered = try await matching.match(source: 44100, enabled: false)
@@ -339,7 +744,7 @@ final class AudioTests {
         XCTAssertEqual(hardware.rates[1], 48000)
         _ = try await matching.match(source: 96000, enabled: true)
         try await matching.restore()
-        XCTAssertEqual(hardware.rates[1], 48000) // Original, not the preceding track's rate.
+        XCTAssertEqual(hardware.rates[1], 48000)  // Original, not the preceding track's rate.
         let count = hardware.writes.count
         _ = try await matching.match(source: 44100, enabled: false)
         XCTAssertEqual(hardware.writes.count, count)
@@ -349,8 +754,10 @@ final class AudioTests {
         XCTAssertEqual(hardware.writes.count, count)
         hardware.supported = [44100...192000]
         hardware.fail = true
-        do { _ = try await matching.match(source: 44100, enabled: true); XCTAssertEqual(true, false) }
-        catch { }
+        do {
+            _ = try await matching.match(source: 44100, enabled: true)
+            XCTAssertEqual(true, false)
+        } catch {}
         hardware.fail = false
         _ = try await matching.match(source: 44100, enabled: true)
         hardware.device = 2
@@ -359,7 +766,10 @@ final class AudioTests {
         XCTAssertEqual(hardware.rates[2], 96000)
         _ = try await matching.match(source: 44100, enabled: true)
         hardware.fail = true
-        do { try await matching.restore(); XCTAssertEqual(true, false) } catch { }
+        do {
+            try await matching.restore()
+            XCTAssertEqual(true, false)
+        } catch {}
         hardware.fail = false
         try await matching.restore()
         XCTAssertEqual(hardware.rates[1], 48000)
@@ -370,22 +780,18 @@ final class AudioTests {
     func testPlaybackQueue() {
         var modes = PlaybackQueue()
         modes.reset(["a", "b"], startingAt: "a")
-        modes.cycleMode()
+        modes.toggleShuffle()
         XCTAssertEqual(modes.isShuffled, true)
-        modes.cycleMode()
+        XCTAssertEqual(modes.current?.trackID, "a")
+        modes.toggleShuffle()
         XCTAssertEqual(modes.isShuffled, false)
-        XCTAssertEqual(modes.isLooping, true)
         XCTAssertEqual(modes.advance(), "b")
-        XCTAssertEqual(modes.hasNext, true)
-        XCTAssertEqual(modes.advance(), "a")
-        modes.cycleMode()
-        XCTAssertEqual(modes.isLooping, false)
-        XCTAssertEqual(modes.advance(), "b")
+        XCTAssertEqual(modes.hasNext, false)
         XCTAssertEqual(modes.advance(), nil)
         modes.reset(["solo"], startingAt: "solo")
-        modes.cycleMode()
-        modes.cycleMode()
-        XCTAssertEqual(modes.advance(), "solo")
+        modes.toggleShuffle()
+        XCTAssertEqual(modes.hasNext, false)
+        XCTAssertEqual(modes.advance(), nil)
         modes.remove("solo")
         XCTAssertEqual(modes.hasNext, false)
         XCTAssertEqual(modes.advance(), nil)
@@ -445,14 +851,11 @@ final class AudioTests {
         queue.moveUpcoming([current!.id, original[0].id], before: nil)
         XCTAssertEqual(queue.current, current)
         XCTAssertEqual(queue.upcoming, manualOrder)
-        queue.cycleMode()
-        queue.cycleMode()
-        XCTAssertEqual(queue.isLooping, true)
+        queue.toggleShuffle()
         queue.clearUpcoming()
         XCTAssertEqual(queue.current, current)
         XCTAssertEqual(queue.upcoming.count, 0)
         XCTAssertEqual(queue.hasNext, false)
-        XCTAssertEqual(queue.isLooping, false)
         queue.enqueue("new", next: false)
         XCTAssertEqual(queue.nextEntry?.trackID, "new")
         queue.clearUpcoming()
@@ -478,7 +881,7 @@ final class AudioTests {
         do {
             try ImportedLyrics.save(from: importSource, for: importSong, root: importedRoot)
             XCTAssertTrue(false)
-        } catch { }
+        } catch {}
         XCTAssertEqual(try ImportedLyrics.read(importedFile).lines.first?.text, "Selected lyrics")
         try Data("Plain selected lyrics".utf8).write(to: importSource)
         try ImportedLyrics.save(from: importSource, for: importSong, root: importedRoot)
@@ -511,7 +914,8 @@ final class AudioTests {
         XCTAssertEqual(try ImportedLyrics.mode(for: localSong, root: importedRoot), .local)
         XCTAssertEqual(try Data(contentsOf: sidecar), localData)
 
-        let parsed = LRCParser.parse("[ar:Artist]\n[00:01.50][00:03]Repeated\n[00:02]Middle\n[offset:500]\n[00:xx]Bad\n[00:99]Bad")
+        let parsed = LRCParser.parse(
+            "[ar:Artist]\n[00:01.50][00:03]Repeated\n[00:02]Middle\n[offset:500]\n[00:xx]Bad\n[00:99]Bad")
         XCTAssertEqual(parsed.lines.map(\.time), [1, 1.5, 2.5])
         XCTAssertEqual(parsed.lines.map(\.text), ["Repeated", "Middle", "Repeated"])
         XCTAssertEqual(parsed.currentLine(at: 0.999), nil)
@@ -541,7 +945,10 @@ final class AudioTests {
         let missing = try makeWAV(name: "No lyrics")
         XCTAssertTrue(await LyricsLoader.load(missing).isEmpty)
         let originalAudio = try Data(contentsOf: missing)
-        let saved = Lyrics(lines: [.init(time: -0.5, text: "Before — စာသား"), .init(time: 1.234, text: "Timed words"), .init(time: 65.01, text: "")])
+        let saved = Lyrics(lines: [
+            .init(time: -0.5, text: "Before — စာသား"), .init(time: 1.234, text: "Timed words"),
+            .init(time: 65.01, text: ""),
+        ])
         try LyricsWriter.write(saved, beside: missing)
         XCTAssertEqual(await LyricsLoader.load(missing), saved)
         let savedBytes = try Data(contentsOf: LyricsWriter.sidecarURL(for: missing))
@@ -556,21 +963,28 @@ final class AudioTests {
         XCTAssertEqual(await LyricsLoader.load(missing), parsed)
         XCTAssertEqual(try Data(contentsOf: missing), originalAudio, "Saving lyrics must not modify audio")
         let override: LyricsLoader.Source = { _ in Lyrics(plainText: "Future local source") }
-        XCTAssertEqual(await LyricsLoader.load(url, sources: [override] + LyricsLoader.sources).plainText, "Future local source")
+        XCTAssertEqual(
+            await LyricsLoader.load(url, sources: [override] + LyricsLoader.sources).plainText, "Future local source")
 
         // Synthetic ID3v2.4 frames exercise USLT text and SYLT millisecond timing.
         func id3(_ id: String, _ body: [UInt8], name: String) throws -> URL {
-            func big(_ n: Int) -> [UInt8] { [UInt8((n >> 24) & 255), UInt8((n >> 16) & 255), UInt8((n >> 8) & 255), UInt8(n & 255)] }
+            func big(_ n: Int) -> [UInt8] {
+                [UInt8((n >> 24) & 255), UInt8((n >> 16) & 255), UInt8((n >> 8) & 255), UInt8(n & 255)]
+            }
             let frame = Array(id.utf8) + big(body.count) + [0, 0] + body
             let n = frame.count
-            let header: [UInt8] = [73, 68, 51, 4, 0, 0, UInt8((n >> 21) & 127), UInt8((n >> 14) & 127), UInt8((n >> 7) & 127), UInt8(n & 127)]
+            let header: [UInt8] = [
+                73, 68, 51, 4, 0, 0, UInt8((n >> 21) & 127), UInt8((n >> 14) & 127), UInt8((n >> 7) & 127),
+                UInt8(n & 127),
+            ]
             let file = directory.appendingPathComponent(name + ".mp3")
             try Data(header + frame).write(to: file)
             return file
         }
         let uslt = try id3("USLT", [3, 101, 110, 103, 0] + Array("Local ID3 words".utf8), name: "USLT")
         XCTAssertEqual(await LyricsLoader.load(uslt).plainText, "Local ID3 words")
-        let sylt = try id3("SYLT", [3, 101, 110, 103, 2, 1, 0] + Array("Timed words".utf8) + [0, 0, 0, 3, 232], name: "SYLT")
+        let sylt = try id3(
+            "SYLT", [3, 101, 110, 103, 2, 1, 0] + Array("Timed words".utf8) + [0, 0, 0, 3, 232], name: "SYLT")
         XCTAssertEqual(await LyricsLoader.load(sylt).lines.first?.time, 1)
         XCTAssertEqual(await LyricsLoader.load(sylt).lines.first?.text, "Timed words")
     }
@@ -606,7 +1020,7 @@ final class AudioTests {
         do {
             try LyricsWriter.saveIfMissing(plain, beside: unavailable)
             XCTAssertEqual(true, false, "Write failures must be reported")
-        } catch { }
+        } catch {}
         let files = try FileManager.default.contentsOfDirectory(atPath: directory.path)
         XCTAssertEqual(files.contains { $0.hasPrefix(".still-lyrics-") }, false, "Temporary files must be cleaned up")
     }
@@ -615,7 +1029,10 @@ final class AudioTests {
         let url = directory.appendingPathComponent("library.playlists.json")
         XCTAssertEqual(try PlaylistStorage.load(from: url), [])
         var playlist = MusicPlaylist(name: "Evening music")
-        playlist.add("a"); playlist.add("b"); playlist.add("a"); playlist.add("c")
+        playlist.add("a")
+        playlist.add("b")
+        playlist.add("a")
+        playlist.add("c")
         XCTAssertEqual(playlist.trackIDs, ["a", "b", "c"], "Adding twice must not duplicate a song")
         playlist.move("c", by: -1)
         XCTAssertEqual(playlist.trackIDs, ["a", "c", "b"])
@@ -637,30 +1054,48 @@ final class AudioTests {
         do {
             _ = try PlaylistStorage.load(from: url)
             XCTAssertEqual(true, false, "A damaged playlist file must be reported, not silently erased")
-        } catch { }
+        } catch {}
     }
 
     func testLibrarySorting() async throws {
         var ten = try await Track.read(makeWAV(name: "Song 10", rate: 192_000, bits: 24))
         var two = try await Track.read(makeWAV(name: "Song 2", rate: 44_100, bits: 16))
         var last = try await Track.read(makeWAV(name: "Z", rate: 96_000, bits: 24))
-        ten.genre = "Rock"; two.genre = "Rock"; last.genre = "Jazz"
-        ten.trackNumber = 2; two.trackNumber = 1; last.trackNumber = 1; last.discNumber = 2
+        ten.genre = "Rock"
+        two.genre = "Rock"
+        last.genre = "Jazz"
+        ten.trackNumber = 2
+        two.trackNumber = 1
+        last.trackNumber = 1
+        last.discNumber = 2
         let tracks = [ten, last, two]
-        XCTAssertEqual(LibrarySort(field: .title).tracks(tracks, library: tracks).map(\.title), ["Song 2", "Song 10", "Z"])
-        XCTAssertEqual(LibrarySort(field: .quality, ascending: false).tracks(tracks, library: tracks).map(\.id), [ten.id, last.id, two.id])
-        XCTAssertEqual(LibrarySort(field: .dateAdded, ascending: false).tracks([ten, two], library: tracks).map(\.id), [two.id, ten.id])
-        XCTAssertEqual(LibrarySort(field: .trackNumber).tracks(tracks, library: tracks).map(\.id), [two.id, ten.id, last.id])
+        XCTAssertEqual(
+            LibrarySort(field: .title).tracks(tracks, library: tracks).map(\.title), ["Song 2", "Song 10", "Z"])
+        XCTAssertEqual(
+            LibrarySort(field: .quality, ascending: false).tracks(tracks, library: tracks).map(\.id),
+            [ten.id, last.id, two.id])
+        XCTAssertEqual(
+            LibrarySort(field: .dateAdded, ascending: false).tracks([ten, two], library: tracks).map(\.id),
+            [two.id, ten.id])
+        XCTAssertEqual(
+            LibrarySort(field: .trackNumber).tracks(tracks, library: tracks).map(\.id), [two.id, ten.id, last.id])
         let groups = LibraryGrouping.groups(tracks, by: .genres)
         XCTAssertEqual(LibrarySort(field: .songCount, ascending: false).groups(groups).map(\.title), ["Rock", "Jazz"])
         XCTAssertEqual(LibrarySort(field: .name).groups(groups).map(\.title), ["Jazz", "Rock"])
         // Equal-quality tracks still have a deterministic reversible order.
         let ties = [ten, two, last].map { track -> Track in
-            var copy = track; copy.trackNumber = nil; copy.discNumber = nil; return copy
+            var copy = track
+            copy.trackNumber = nil
+            copy.discNumber = nil
+            return copy
         }
         let forward = LibrarySort(field: .trackNumber).tracks(ties, library: tracks).map(\.id)
-        XCTAssertEqual(LibrarySort(field: .trackNumber, ascending: false).tracks(ties, library: tracks).map(\.id), Array(forward.reversed()))
-        let preferences = ["Songs": LibrarySort(field: .quality, ascending: false), "Albums": LibrarySort(field: .songCount)]
+        XCTAssertEqual(
+            LibrarySort(field: .trackNumber, ascending: false).tracks(ties, library: tracks).map(\.id),
+            Array(forward.reversed()))
+        let preferences = [
+            "Songs": LibrarySort(field: .quality, ascending: false), "Albums": LibrarySort(field: .songCount),
+        ]
         let snapshot = LibrarySnapshot(tracks: tracks, sortPreferences: preferences)
         let decoded = try JSONDecoder().decode(LibrarySnapshot.self, from: JSONEncoder().encode(snapshot))
         XCTAssertEqual(decoded.sortPreferences, preferences)
@@ -693,8 +1128,10 @@ final class AudioTests {
 
     func testNativeLosslessAndAACDecoders() async throws {
         let source = try makeWAV(name: "Source", rate: 96_000, bits: 24)
-        let formats = [("flac", "flac", "flac", "FLAC"), ("m4a", "m4af", "alac", "ALAC"),
-                       ("aiff", "AIFF", "BEI24", "AIFF"), ("aac", "adts", "aac", "AAC")]
+        let formats = [
+            ("flac", "flac", "flac", "FLAC"), ("m4a", "m4af", "alac", "ALAC"),
+            ("aiff", "AIFF", "BEI24", "AIFF"), ("aac", "adts", "aac", "AAC"),
+        ]
         for (ext, container, codec, label) in formats {
             let destination = directory.appendingPathComponent("Converted.\(ext)")
             let process = Process()
@@ -712,7 +1149,9 @@ final class AudioTests {
             if label != "AAC" {
                 XCTAssertEqual(track.sampleRate, 96_000)
                 XCTAssertEqual(track.bitDepth, 24, "Source depth for \(label)")
-            } else { XCTAssertEqual(track.bitDepth, 0, "Lossy audio should not show a source PCM bit depth") }
+            } else {
+                XCTAssertEqual(track.bitDepth, 0, "Lossy audio should not show a source PCM bit depth")
+            }
             try assertDecodes(destination)
         }
     }
@@ -732,7 +1171,8 @@ final class AudioTests {
         let track = try await Track.read(makeWAV(name: "Saved"))
         let location = directory.appendingPathComponent("nested/library.json")
         XCTAssertTrue(try LibraryStorage.load(from: location).tracks.isEmpty)
-        try LibraryStorage.save(LibrarySnapshot(tracks: [track], currentID: track.id, position: 0.12, volume: 0.4), to: location)
+        try LibraryStorage.save(
+            LibrarySnapshot(tracks: [track], currentID: track.id, position: 0.12, volume: 0.4), to: location)
         let restored = try LibraryStorage.load(from: location)
         XCTAssertEqual(restored.tracks, [track])
         XCTAssertEqual(restored.currentID, track.id)
@@ -747,8 +1187,20 @@ final class AudioTests {
     }
 
     func testFLACMetadataAndGrouping() async throws {
-        let first = try await Track.read(makeTaggedFLAC(name: "Tagged one", tags: ["TITLE=First song", "ARTIST=Singer One", "ALBUM=Shared title", "ALBUMARTIST=The Ensemble", "GENRE=Jazz", "COMPOSER=Jane Writer", "TRACKNUMBER=2/10", "DISCNUMBER=1", "DATE=2024-03-12"]))
-        let second = try await Track.read(makeTaggedFLAC(name: "Tagged two", tags: ["TITLE=Second song", "ARTIST=Singer Two", "ALBUM=Shared title", "ALBUMARTIST=The Ensemble", "GENRE=Jazz", "TRACKNUMBER=1"]))
+        let first = try await Track.read(
+            makeTaggedFLAC(
+                name: "Tagged one",
+                tags: [
+                    "TITLE=First song", "ARTIST=Singer One", "ALBUM=Shared title", "ALBUMARTIST=The Ensemble",
+                    "GENRE=Jazz", "COMPOSER=Jane Writer", "TRACKNUMBER=2/10", "DISCNUMBER=1", "DATE=2024-03-12",
+                ]))
+        let second = try await Track.read(
+            makeTaggedFLAC(
+                name: "Tagged two",
+                tags: [
+                    "TITLE=Second song", "ARTIST=Singer Two", "ALBUM=Shared title", "ALBUMARTIST=The Ensemble",
+                    "GENRE=Jazz", "TRACKNUMBER=1",
+                ]))
         let details = await TrackDetails.read(for: first)
         XCTAssertEqual(details.date, "2024-03-12")
         XCTAssertEqual(details.channels, 2)
@@ -778,15 +1230,22 @@ final class AudioTests {
         XCTAssertEqual(Set(genres.map(\.title)), Set(["R&B", "Soul", "Contemporary R&B", "Rock", "Pop"]))
         XCTAssertEqual(genres.first(where: { $0.title == "R&B" })?.tracks.count, 1)
         tagged.composer = "R & B; Jane/John"
-        XCTAssertEqual(Set(LibraryGrouping.groups([tagged], by: .composers).map(\.title)), Set(["R", "B", "Jane", "John"]))
+        XCTAssertEqual(
+            Set(LibraryGrouping.groups([tagged], by: .composers).map(\.title)), Set(["R", "B", "Jane", "John"]))
     }
 
     func testEmbeddedLyricsEditing() async throws {
-        let flac = try makeTaggedFLAC(name: "Edit embedded", tags: ["TITLE=Keep title", "ARTIST=Keep artist", "LYRICS=Old lyrics", "UNSYNCEDLYRICS=Older lyrics", "COMMENT=Keep comment"])
+        let flac = try makeTaggedFLAC(
+            name: "Edit embedded",
+            tags: [
+                "TITLE=Keep title", "ARTIST=Keep artist", "LYRICS=Old lyrics", "UNSYNCEDLYRICS=Older lyrics",
+                "COMMENT=Keep comment",
+            ])
         let cover = try makeCover(red: 130)
         try FLACArtworkWriter.write(cover, to: flac)
         let mp3 = directory.appendingPathComponent("Edit embedded.mp3")
-        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
             .appendingPathComponent("Vendor/taglib-2.2.1/tests/data/lame_cbr.mp3")
         try FileManager.default.copyItem(at: fixture, to: mp3)
         let m4a = directory.appendingPathComponent("Native tags.m4a")
@@ -817,10 +1276,15 @@ final class AudioTests {
                 while offset + 8 <= data.count {
                     func number(_ range: Range<Int>) -> UInt64 { data[range].reduce(0) { ($0 << 8) | UInt64($1) } }
                     var size = Int(number(offset..<offset + 4)), header = 8
-                    if size == 1 { size = Int(number(offset + 8..<offset + 16)); header = 16 }
+                    if size == 1 {
+                        size = Int(number(offset + 8..<offset + 16))
+                        header = 16
+                    }
                     if size == 0 { size = data.count - offset }
                     guard size >= header, offset + size <= data.count else { throw CocoaError(.fileReadCorruptFile) }
-                    if data[offset + 4..<offset + 8] == Data("mdat".utf8) { payload.append(data[offset + header..<offset + size]) }
+                    if data[offset + 4..<offset + 8] == Data("mdat".utf8) {
+                        payload.append(data[offset + header..<offset + size])
+                    }
                     offset += size
                 }
                 return payload
@@ -837,13 +1301,16 @@ final class AudioTests {
             try ImportedLyrics.save(synced, for: url, root: drafts)
             XCTAssertEqual(try Data(contentsOf: url), originalFile, "Preparing lyrics must never write to audio")
             try EmbeddedLyricsWriter.write(synced, to: url)
-            XCTAssertEqual(await LyricsLoader.embedded(url), synced, "Embedded synced lyrics round trip: \(url.pathExtension)")
-            XCTAssertEqual(try audioPayload(url), originalPayload, "Encoded audio unchanged after writing: \(url.pathExtension)")
+            XCTAssertEqual(
+                await LyricsLoader.embedded(url), synced, "Embedded synced lyrics round trip: \(url.pathExtension)")
+            XCTAssertEqual(
+                try audioPayload(url), originalPayload, "Encoded audio unchanged after writing: \(url.pathExtension)")
             try EmbeddedLyricsWriter.write(plain, to: url)
             XCTAssertEqual(await LyricsLoader.embedded(url), plain, "Replace synced with plain: \(url.pathExtension)")
             try EmbeddedLyricsWriter.write(nil, to: url)
             XCTAssertTrue((await LyricsLoader.embedded(url))?.isEmpty != false)
-            XCTAssertEqual(try audioPayload(url), originalPayload, "Encoded audio unchanged after deletion: \(url.pathExtension)")
+            XCTAssertEqual(
+                try audioPayload(url), originalPayload, "Encoded audio unchanged after deletion: \(url.pathExtension)")
             let after = try await Track.read(url)
             XCTAssertEqual(after.title, tags.title)
             XCTAssertEqual(after.artist, tags.artist)
@@ -852,30 +1319,47 @@ final class AudioTests {
             try assertDecodes(url)
             let unchanged = try Data(contentsOf: url)
             try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url.path)
-            do { try EmbeddedLyricsWriter.write(plain, to: url); XCTAssertTrue(false) } catch { }
+            do {
+                try EmbeddedLyricsWriter.write(plain, to: url)
+                XCTAssertTrue(false)
+            } catch {}
             XCTAssertEqual(try Data(contentsOf: url), unchanged)
             try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
         }
         let invalid = directory.appendingPathComponent("Invalid write.flac")
         let invalidData = Data("not a flac".utf8)
         try invalidData.write(to: invalid)
-        do { try EmbeddedLyricsWriter.write(plain, to: invalid); XCTAssertTrue(false) } catch { }
+        do {
+            try EmbeddedLyricsWriter.write(plain, to: invalid)
+            XCTAssertTrue(false)
+        } catch {}
         XCTAssertEqual(try Data(contentsOf: invalid), invalidData)
         let unsupported = try makeWAV(name: "Unsupported write")
         let original = try Data(contentsOf: unsupported)
-        do { try EmbeddedLyricsWriter.write(plain, to: unsupported); XCTAssertTrue(false) } catch { }
+        do {
+            try EmbeddedLyricsWriter.write(plain, to: unsupported)
+            XCTAssertTrue(false)
+        } catch {}
         XCTAssertEqual(try Data(contentsOf: unsupported), original)
-        let leftovers = try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasPrefix(".still-lyrics-") }
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: directory.path).filter {
+            $0.hasPrefix(".still-lyrics-")
+        }
         XCTAssertTrue(leftovers.isEmpty)
     }
 
     func testM4AMetadata() async throws {
         let source = try makeWAV(name: "Native metadata")
         let destination = directory.appendingPathComponent("Native tags.m4a")
-        let exporter = try XCTUnwrap(AVAssetExportSession(asset: AVURLAsset(url: source), presetName: AVAssetExportPresetAppleM4A))
+        let exporter = try XCTUnwrap(
+            AVAssetExportSession(asset: AVURLAsset(url: source), presetName: AVAssetExportPresetAppleM4A))
         exporter.outputURL = destination
         exporter.outputFileType = .m4a
-        let values: [(AVMetadataIdentifier, String)] = [(.commonIdentifierTitle, "A tagged song"), (.commonIdentifierArtist, "Soloist"), (.commonIdentifierAlbumName, "Night Music"), (.iTunesMetadataAlbumArtist, "House Band"), (.iTunesMetadataUserGenre, "Ambient"), (.iTunesMetadataComposer, "A. Composer"), (.iTunesMetadataLyrics, "Embedded M4A words")]
+        let values: [(AVMetadataIdentifier, String)] = [
+            (.commonIdentifierTitle, "A tagged song"), (.commonIdentifierArtist, "Soloist"),
+            (.commonIdentifierAlbumName, "Night Music"), (.iTunesMetadataAlbumArtist, "House Band"),
+            (.iTunesMetadataUserGenre, "Ambient"), (.iTunesMetadataComposer, "A. Composer"),
+            (.iTunesMetadataLyrics, "Embedded M4A words"),
+        ]
         exporter.metadata = values.map { identifier, value in
             let item = AVMutableMetadataItem()
             item.identifier = identifier
@@ -922,7 +1406,8 @@ final class AudioTests {
     }
 
     func testFLACCoverWriting() async throws {
-        let url = try makeTaggedFLAC(name: "Write cover", tags: ["TITLE=Preserve tags", "ARTIST=Artist", "LYRICS=Local words"])
+        let url = try makeTaggedFLAC(
+            name: "Write cover", tags: ["TITLE=Preserve tags", "ARTIST=Artist", "LYRICS=Local words"])
         let back = try makeCover(red: 40)
         try appendPicture(url, type: 4, image: back)
         func parts(_ data: Data) throws -> (Data, [Data]) {
@@ -951,10 +1436,16 @@ final class AudioTests {
         XCTAssertEqual(await Track.artwork(for: url), back)
         XCTAssertEqual(try parts(Data(contentsOf: url)).0, before.0)
         let saved = try Data(contentsOf: url)
-        do { try FLACArtworkWriter.write(Data("not an image".utf8), to: url); XCTAssertTrue(false) } catch { }
+        do {
+            try FLACArtworkWriter.write(Data("not an image".utf8), to: url)
+            XCTAssertTrue(false)
+        } catch {}
         XCTAssertEqual(try Data(contentsOf: url), saved)
         try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url.path)
-        do { try FLACArtworkWriter.write(cover, to: url); XCTAssertTrue(false) } catch { }
+        do {
+            try FLACArtworkWriter.write(cover, to: url)
+            XCTAssertTrue(false)
+        } catch {}
         XCTAssertEqual(try Data(contentsOf: url), saved)
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
     }
@@ -979,24 +1470,37 @@ final class AudioTests {
         XCTAssertEqual(requests.contains { $0.contains(url.path) }, false)
         let lyricQuery = URLComponents(string: requests[0])!.queryItems!.map(\.name)
         XCTAssertEqual(Set(lyricQuery), Set(["track_name", "artist_name"]))
-        let local = await LyricsLoader.load(url, sources: [{ _ in Lyrics(plainText: "Local") }, { _ in
-            try? await service.lyrics(for: track)
-        }])
+        let local = await LyricsLoader.load(
+            url,
+            sources: [
+                { _ in Lyrics(plainText: "Local") },
+                { _ in
+                    try? await service.lyrics(for: track)
+                },
+            ])
         XCTAssertEqual(local.plainText, "Local")
         XCTAssertEqual(await transport.count(), 1)
-        let cancelled = Task { try Task.checkCancellation(); return try await service.lyrics(for: track) }
+        let cancelled = Task {
+            try Task.checkCancellation()
+            return try await service.lyrics(for: track)
+        }
         cancelled.cancel()
         _ = try? await cancelled.value
         XCTAssertEqual(await transport.count(), 1)
     }
 
     private func makeCover(red: UInt8) throws -> Data {
-        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2,
-            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-            colorSpaceName: .deviceRGB, bytesPerRow: 8, bitsPerPixel: 32))
+        let bitmap = try XCTUnwrap(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 8, bitsPerPixel: 32))
         let bytes = try XCTUnwrap(bitmap.bitmapData)
         for offset in stride(from: 0, to: 16, by: 4) {
-            bytes[offset] = red; bytes[offset + 1] = 80; bytes[offset + 2] = 120; bytes[offset + 3] = 255
+            bytes[offset] = red
+            bytes[offset + 1] = 80
+            bytes[offset + 2] = 120
+            bytes[offset + 3] = 255
         }
         return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
     }
@@ -1007,26 +1511,39 @@ final class AudioTests {
         var offset = 4
         while offset + 4 <= original.count {
             let flag = original[offset]
-            let size = Int(original[offset+1]) << 16 | Int(original[offset+2]) << 8 | Int(original[offset+3])
+            let size = Int(original[offset + 1]) << 16 | Int(original[offset + 2]) << 8 | Int(original[offset + 3])
             output.append(flag & 0x7f)
-            output.append(original[(offset+1)..<(offset+4+size)])
+            output.append(original[(offset + 1)..<(offset + 4 + size)])
             offset += 4 + size
             if flag & 0x80 != 0 { break }
         }
         var payload = Data()
-        func number(_ value: Int) { for shift in [24, 16, 8, 0] { payload.append(UInt8(truncatingIfNeeded: value >> shift)) } }
-        func field(_ bytes: Data) { number(bytes.count); payload.append(bytes) }
-        number(type); field(Data("image/png".utf8)); field(Data())
-        number(2); number(2); number(32); number(0); field(image)
+        func number(_ value: Int) {
+            for shift in [24, 16, 8, 0] { payload.append(UInt8(truncatingIfNeeded: value >> shift)) }
+        }
+        func field(_ bytes: Data) {
+            number(bytes.count)
+            payload.append(bytes)
+        }
+        number(type)
+        field(Data("image/png".utf8))
+        field(Data())
+        number(2)
+        number(2)
+        number(32)
+        number(0)
+        field(image)
         output.append(0x86)
         for shift in [16, 8, 0] { output.append(UInt8(truncatingIfNeeded: payload.count >> shift)) }
-        output.append(payload); output.append(original[offset...])
+        output.append(payload)
+        output.append(original[offset...])
         try output.write(to: url)
     }
 
     func testLegacyLibraryAndPreferences() async throws {
         let track = try await Track.read(makeWAV(name: "Legacy"))
-        let snapshot = LibrarySnapshot(tracks: [track], currentID: track.id, position: 0.1, favoriteIDs: [track.id], theme: "black")
+        let snapshot = LibrarySnapshot(
+            tracks: [track], currentID: track.id, position: 0.1, favoriteIDs: [track.id], theme: "black")
         let data = try JSONEncoder().encode(snapshot)
         let restored = try JSONDecoder().decode(LibrarySnapshot.self, from: data)
         XCTAssertEqual(restored.theme, "black")
@@ -1035,7 +1552,9 @@ final class AudioTests {
         legacy.removeValue(forKey: "theme")
         legacy.removeValue(forKey: "favoriteIDs")
         var legacyTrack = try XCTUnwrap((legacy["tracks"] as? [[String: Any]])?.first)
-        for key in ["albumArtist", "genre", "composer", "trackNumber", "discNumber", "metadataVersion", "bitRate"] { legacyTrack.removeValue(forKey: key) }
+        for key in ["albumArtist", "genre", "composer", "trackNumber", "discNumber", "metadataVersion", "bitRate"] {
+            legacyTrack.removeValue(forKey: key)
+        }
         legacy["tracks"] = [legacyTrack]
         let old = try JSONDecoder().decode(LibrarySnapshot.self, from: JSONSerialization.data(withJSONObject: legacy))
         XCTAssertEqual(old.tracks.count, 1)
@@ -1051,24 +1570,32 @@ final class AudioTests {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/afconvert")
         process.arguments = [source.path, destination.path, "-f", "flac", "-d", "flac"]
-        try process.run(); process.waitUntilExit()
+        try process.run()
+        process.waitUntilExit()
         let original = try Data(contentsOf: destination)
         var output = Data("fLaC".utf8)
         var offset = 4
         while offset + 4 <= original.count {
             let flag = original[offset]
-            let size = Int(original[offset+1]) << 16 | Int(original[offset+2]) << 8 | Int(original[offset+3])
+            let size = Int(original[offset + 1]) << 16 | Int(original[offset + 2]) << 8 | Int(original[offset + 3])
             if flag & 0x7f != 4 {
                 output.append(flag & 0x7f)
-                output.append(original[(offset+1)..<(offset+4+size)])
+                output.append(original[(offset + 1)..<(offset + 4 + size)])
             }
             offset += 4 + size
             if flag & 0x80 != 0 { break }
         }
         var payload = Data()
-        func number(_ value: Int) { for shift in [0, 8, 16, 24] { payload.append(UInt8(truncatingIfNeeded: value >> shift)) } }
-        func string(_ value: String) { let bytes = Data(value.utf8); number(bytes.count); payload.append(bytes) }
-        string("Still test fixture"); number(tags.count)
+        func number(_ value: Int) {
+            for shift in [0, 8, 16, 24] { payload.append(UInt8(truncatingIfNeeded: value >> shift)) }
+        }
+        func string(_ value: String) {
+            let bytes = Data(value.utf8)
+            number(bytes.count)
+            payload.append(bytes)
+        }
+        string("Still test fixture")
+        number(tags.count)
         for tag in tags { string(tag) }
         output.append(0x84)
         for shift in [16, 8, 0] { output.append(UInt8(truncatingIfNeeded: payload.count >> shift)) }
@@ -1096,14 +1623,22 @@ final class AudioTests {
             var little = number.littleEndian
             withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
         }
-        data.append(contentsOf: "RIFF".utf8); append(UInt32(36 + dataSize))
-        data.append(contentsOf: "WAVEfmt ".utf8); append(UInt32(16))
-        append(UInt16(1)); append(UInt16(2)); append(UInt32(rate))
-        append(UInt32(rate * 2 * bytesPerSample)); append(UInt16(2 * bytesPerSample)); append(UInt16(bits))
-        data.append(contentsOf: "data".utf8); append(UInt32(dataSize))
+        data.append(contentsOf: "RIFF".utf8)
+        append(UInt32(36 + dataSize))
+        data.append(contentsOf: "WAVEfmt ".utf8)
+        append(UInt32(16))
+        append(UInt16(1))
+        append(UInt16(2))
+        append(UInt32(rate))
+        append(UInt32(rate * 2 * bytesPerSample))
+        append(UInt16(2 * bytesPerSample))
+        append(UInt16(bits))
+        data.append(contentsOf: "data".utf8)
+        append(UInt32(dataSize))
         // A quiet synthetic sine wave; no copyrighted fixtures or user files.
         for frame in 0..<frames {
-            let sample = Int32(sin(Double(frame) * 2 * .pi * frequency / Double(rate)) * Double((1 << (bits - 1)) - 1) * 0.01)
+            let sample = Int32(
+                sin(Double(frame) * 2 * .pi * frequency / Double(rate)) * Double((1 << (bits - 1)) - 1) * 0.01)
             for _ in 0..<2 {
                 for byte in 0..<bytesPerSample { data.append(UInt8(truncatingIfNeeded: sample >> (byte * 8))) }
             }
@@ -1118,19 +1653,33 @@ final class AudioTests {
 // Tools, which do not bundle XCTest on every macOS release.
 private var failures = 0
 private func XCTAssertEqual<T: Equatable>(_ actual: T, _ expected: T, _ message: String = "") {
-    if actual != expected { failures += 1; print("FAIL: \(actual) != \(expected). \(message)") }
+    if actual != expected {
+        failures += 1
+        print("FAIL: \(actual) != \(expected). \(message)")
+    }
 }
 private func XCTAssertEqual(_ actual: Double, _ expected: Double, accuracy: Double) {
-    if abs(actual - expected) > accuracy { failures += 1; print("FAIL: \(actual) != \(expected) ± \(accuracy)") }
+    if abs(actual - expected) > accuracy {
+        failures += 1
+        print("FAIL: \(actual) != \(expected) ± \(accuracy)")
+    }
 }
 private func XCTAssertTrue(_ value: Bool) {
-    if !value { failures += 1; print("FAIL: expected true") }
+    if !value {
+        failures += 1
+        print("FAIL: expected true")
+    }
 }
 private func XCTAssertGreaterThan<T: Comparable>(_ actual: T, _ minimum: T, _ message: String = "") {
-    if actual <= minimum { failures += 1; print("FAIL: \(actual) must exceed \(minimum). \(message)") }
+    if actual <= minimum {
+        failures += 1
+        print("FAIL: \(actual) must exceed \(minimum). \(message)")
+    }
 }
 private func XCTUnwrap<T>(_ value: T?) throws -> T {
-    guard let value else { throw NSError(domain: "StillChecks", code: 1, userInfo: [NSLocalizedDescriptionKey: "Unexpected nil"]) }
+    guard let value else {
+        throw NSError(domain: "StillChecks", code: 1, userInfo: [NSLocalizedDescriptionKey: "Unexpected nil"])
+    }
     return value
 }
 
@@ -1153,6 +1702,12 @@ struct StillChecks {
             try await suite.testM4AMetadata()
             try await suite.testEmbeddedLyricsEditing()
             try await suite.testLegacyLibraryAndPreferences()
+            try suite.testOnRepeat()
+            try suite.testSongFileDeletion()
+            try suite.testPersistentQueue()
+            try await suite.testBackgroundPersistence()
+            try await suite.testTagAndArtworkEdits()
+            try await suite.testExtendedCodecs()
             try await suite.testFLACArtwork()
             try await suite.testFLACCoverWriting()
             try await suite.testOnlineMetadata()
@@ -1164,6 +1719,8 @@ struct StillChecks {
             suite.testQueueControls()
             try await suite.testOutputSampleRates()
             try await suite.testEngineRendering()
+            try await suite.testEqualizer()
+            try suite.testEqualizerTransparency()
             try await suite.testGaplessOutput()
             try await suite.testQueueEditsPreserveAudio()
             try await suite.testAudioDiagnostics()
@@ -1171,8 +1728,14 @@ struct StillChecks {
             try await suite.testMovedLibraryPaths()
             if CommandLine.arguments.contains("--verify-output-rates") { try await suite.verifyHardwareRates() }
             if CommandLine.arguments.contains("--export-fixtures") { try suite.exportUIFixtures() }
-        } catch { failures += 1; print("FAIL: \(error)") }
-        print(failures == 0 ? "PASS: all 25 audio, artwork, metadata, grouping, sorting, lyrics, queue, and library checks" : "FAILED: \(failures) checks")
+        } catch {
+            failures += 1
+            print("FAIL: \(error)")
+        }
+        print(
+            failures == 0
+                ? "PASS: all audio, artwork, metadata, grouping, sorting, lyrics, queue, and library checks"
+                : "FAILED: \(failures) checks")
         exit(failures == 0 ? 0 : 1)
     }
 }
@@ -1206,8 +1769,15 @@ private actor MetadataTransport {
         if url.host == "lrclib.net" {
             return try JSONSerialization.data(withJSONObject: [
                 ["trackName": "Different", "artistName": "Artist", "duration": duration, "plainLyrics": "Wrong"],
-                ["trackName": "Title", "artistName": "Artist", "albumName": "Album", "duration": duration, "plainLyrics": "Plain album match"],
-                ["trackName": "Title", "artistName": "Artist", "albumName": "Other album", "duration": duration, "syncedLyrics": "[00:01]Timed words"]])
+                [
+                    "trackName": "Title", "artistName": "Artist", "albumName": "Album", "duration": duration,
+                    "plainLyrics": "Plain album match",
+                ],
+                [
+                    "trackName": "Title", "artistName": "Artist", "albumName": "Other album", "duration": duration,
+                    "syncedLyrics": "[00:01]Timed words",
+                ],
+            ])
         }
         throw URLError(.unsupportedURL)
     }

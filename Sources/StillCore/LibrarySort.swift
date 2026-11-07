@@ -39,7 +39,9 @@ public struct LibrarySort: Codable, Equatable {
             case .dateAdded: comparison = compare(added[a.id] ?? 0, added[b.id] ?? 0)
             case .trackNumber:
                 comparison = compare(a.discNumber ?? 1, b.discNumber ?? 1)
-                if comparison == .orderedSame { comparison = compare(a.trackNumber ?? Int.max, b.trackNumber ?? Int.max) }
+                if comparison == .orderedSame {
+                    comparison = compare(a.trackNumber ?? Int.max, b.trackNumber ?? Int.max)
+                }
             case .quality:
                 // Source fidelity: lossless first, then depth, sample rate and bitrate.
                 comparison = compare(a.bitDepth > 0 ? 1 : 0, b.bitDepth > 0 ? 1 : 0)

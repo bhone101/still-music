@@ -39,7 +39,8 @@ enum EmbeddedArtwork {
             return block.subdata(in: cursor..<(cursor + size))
         }
         guard let type = number(), let mime = bytes(), mime != Data("-->".utf8),
-              bytes() != nil else { return nil }
+            bytes() != nil
+        else { return nil }
         for _ in 0..<4 { guard number() != nil else { return nil } }
         guard let image = bytes(), !image.isEmpty else { return nil }
         return (type, image)

@@ -36,36 +36,39 @@ struct QueueView: View {
                 Text("Up next").font(.headline)
                 Spacer()
                 Button("Clear All") { edit { model.clearQueue() } }
-                    .disabled(presentation.snapshot.rows.isEmpty && !presentation.snapshot.isLooping)
+                    .disabled(presentation.snapshot.rows.isEmpty)
             }
-            if presentation.snapshot.isLooping { Text("The queue repeats after the last song.").font(.caption).foregroundStyle(.secondary) }
             if presentation.snapshot.rows.isEmpty {
                 Text("No songs queued").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
-                        ForEach(presentation.snapshot.rows) { row in
-                            let track = row.track
-                              HStack(spacing: 10) {
-                                Image(systemName: "line.3.horizontal")
-                                    .foregroundStyle(.tertiary).accessibilityHidden(true)
-                                Button { model.playQueueEntry(row.id) } label: {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(track.title).lineLimit(1)
-                                        Text(track.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                                }.buttonStyle(.plain)
-                                Button { edit { model.removeQueueEntry(row.id) } } label: {
-                                    Image(systemName: "minus").frame(width: 28, height: 28)
-                                        .contentShape(Rectangle())
-                                }.buttonStyle(.plain)
-                                    .help("Remove from queue")
-                                    .accessibilityLabel("Remove \(track.title) from queue")
-                              }.padding(.vertical, 4)
-                                .listRowBackground(Color.clear)
-                        }
-                        .onMove { offsets, destination in
-                            edit { model.moveQueueEntries(from: offsets, to: destination) }
-                        }
+                    ForEach(presentation.snapshot.rows) { row in
+                        let track = row.track
+                        HStack(spacing: 10) {
+                            Image(systemName: "line.3.horizontal")
+                                .foregroundStyle(.tertiary).accessibilityHidden(true)
+                            Button {
+                                model.playQueueEntry(row.id)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(track.title).lineLimit(1)
+                                    Text(track.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                            Button {
+                                edit { model.removeQueueEntry(row.id) }
+                            } label: {
+                                Image(systemName: "minus").frame(width: 28, height: 28)
+                                    .contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                                .help("Remove from queue")
+                                .accessibilityLabel("Remove \(track.title) from queue")
+                        }.padding(.vertical, 4)
+                            .listRowBackground(Color.clear)
+                    }
+                    .onMove { offsets, destination in
+                        edit { model.moveQueueEntries(from: offsets, to: destination) }
+                    }
                 }.listStyle(.plain)
                     .scrollContentBackground(.hidden)
             }
@@ -82,7 +85,9 @@ struct QueueButton: View {
     @QueueState private var showingQueue = false
 
     var body: some View {
-        Button { withoutQueueAnimation { showingQueue.toggle() } } label: {
+        Button {
+            withoutQueueAnimation { showingQueue.toggle() }
+        } label: {
             Image(systemName: "list.bullet")
                 .font(.system(size: expanded ? 24 : 20))
                 .frame(width: expanded ? 40 : 36, height: expanded ? 48 : 40)
@@ -103,7 +108,6 @@ struct QueueButton: View {
     struct Snapshot: Equatable {
         var current: Track?
         var rows: [Row] = []
-        var isLooping = false
     }
     @Published private(set) var snapshot = Snapshot()
     private var subscription: AnyCancellable?
@@ -112,9 +116,11 @@ struct QueueButton: View {
         subscription = Publishers.CombineLatest3(model.$tracks, model.$queue, model.$currentID)
             .map { tracks, queue, currentID in
                 let index = Dictionary(tracks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-                return Snapshot(current: currentID.flatMap { index[$0] }, rows: queue.upcoming.compactMap { entry in
-                    index[entry.trackID].map { Row(id: entry.id, track: $0) }
-                }, isLooping: queue.isLooping)
+                return Snapshot(
+                    current: currentID.flatMap { index[$0] },
+                    rows: queue.upcoming.compactMap { entry in
+                        index[entry.trackID].map { Row(id: entry.id, track: $0) }
+                    })
             }
             .removeDuplicates()
             .sink { [weak self] in self?.snapshot = $0 }

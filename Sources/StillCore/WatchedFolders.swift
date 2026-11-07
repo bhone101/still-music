@@ -2,7 +2,6 @@ import Foundation
 
 public struct WatchedFolders: Codable {
     public private(set) var paths: Set<String> = []
-    public var ignoredTrackIDs: Set<String> = []
     public init() {}
     public var urls: [URL] { paths.sorted().map { URL(fileURLWithPath: $0, isDirectory: true) } }
     public mutating func include(_ urls: [URL]) {
@@ -15,9 +14,10 @@ public struct WatchedFolders: Codable {
         }
         // Avoid enumerating overlapping directory trees more than once.
         let all = paths
-        paths = Set(all.filter { path in
-            !all.contains { parent in parent != path && path.hasPrefix(parent == "/" ? parent : parent + "/") }
-        })
+        paths = Set(
+            all.filter { path in
+                !all.contains { parent in parent != path && path.hasPrefix(parent == "/" ? parent : parent + "/") }
+            })
     }
     public func save(to url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

@@ -29,14 +29,18 @@ public enum EmbeddedLyricsWriter {
         if let lyrics {
             let data = try LyricsWriter.encode(lyrics)
             guard data.count <= 8 * 1024 * 1024, !data.contains(0),
-                  let value = String(data: data, encoding: .utf8) else { throw WriteError.invalidText }
+                let value = String(data: data, encoding: .utf8)
+            else { throw WriteError.invalidText }
             text = value
-        } else { text = nil }
+        } else {
+            text = nil
+        }
         let fm = FileManager.default
         let before = try fm.attributesOfItem(atPath: url.path)
         let mode = (before[.posixPermissions] as? NSNumber)?.intValue ?? 0
         guard mode & 0o222 != 0, fm.isWritableFile(atPath: url.path) else { throw WriteError.readOnly }
-        let temporary = url.deletingLastPathComponent().appendingPathComponent(".still-lyrics-\(UUID().uuidString).\(format)")
+        let temporary = url.deletingLastPathComponent().appendingPathComponent(
+            ".still-lyrics-\(UUID().uuidString).\(format)")
         defer { try? fm.removeItem(at: temporary) }
         try Task.checkCancellation()
         try fm.copyItem(at: url, to: temporary)
@@ -56,8 +60,9 @@ public enum EmbeddedLyricsWriter {
         try Task.checkCancellation()
         let after = try fm.attributesOfItem(atPath: url.path)
         guard before[.size] as? NSNumber == after[.size] as? NSNumber,
-              before[.modificationDate] as? Date == after[.modificationDate] as? Date,
-              before[.systemFileNumber] as? NSNumber == after[.systemFileNumber] as? NSNumber else { throw WriteError.changed }
+            before[.modificationDate] as? Date == after[.modificationDate] as? Date,
+            before[.systemFileNumber] as? NSNumber == after[.systemFileNumber] as? NSNumber
+        else { throw WriteError.changed }
         _ = try fm.replaceItemAt(url, withItemAt: temporary)
     }
 }

@@ -1,21 +1,39 @@
 import Foundation
 
-public struct PlaybackQueue {
-    public struct Entry: Identifiable, Equatable {
-        public let id = UUID()
+public struct PlaybackQueue: Codable {
+    public struct Entry: Identifiable, Equatable, Codable {
+        public let id: UUID
+        init(trackID: String) {
+            self.id = UUID()
+            self.trackID = trackID
+        }
         public fileprivate(set) var trackID: String
     }
     public private(set) var items: [Entry] = []
     public private(set) var currentIndex = 0
     public private(set) var isShuffled = false
-    public private(set) var isLooping = false
     private var order: [UUID] = []
     public var current: Entry? { items.indices.contains(currentIndex) ? items[currentIndex] : nil }
     public var upcoming: [Entry] { Array(items.dropFirst(currentIndex + 1)) }
     public var nextEntry: Entry? { hasNext ? items[(currentIndex + 1) % items.count] : nil }
-    public var hasNext: Bool { currentIndex + 1 < items.count || (isLooping && !items.isEmpty) }
+    public var hasNext: Bool { currentIndex + 1 < items.count }
 
     public init() {}
+    private enum CodingKeys: String, CodingKey { case items, currentIndex, isShuffled, order }
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        items = try container.decode([Entry].self, forKey: .items)
+        currentIndex = try container.decode(Int.self, forKey: .currentIndex)
+        isShuffled = try container.decode(Bool.self, forKey: .isShuffled)
+        order = try container.decode([UUID].self, forKey: .order)
+        let ids = Set(items.map(\.id))
+        guard ids.count == items.count, Set(order) == ids, order.count == ids.count,
+            currentIndex >= 0, currentIndex <= items.count
+        else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .items, in: container, debugDescription: "Invalid saved playback queue")
+        }
+    }
     public mutating func reset(_ ids: [String], startingAt id: String) {
         items = ids.map { Entry(trackID: $0) }
         if !ids.contains(id) { items.insert(Entry(trackID: id), at: 0) }
@@ -32,25 +50,19 @@ public struct PlaybackQueue {
         let entry = Entry(trackID: id)
         let index = next ? min(currentIndex + 1, items.count) : items.count
         items.insert(entry, at: index)
-        if next, let current, let original = order.firstIndex(of: current.id) { order.insert(entry.id, at: original + 1) }
-        else { order.append(entry.id) }
-    }
-    public mutating func cycleMode() {
-        if isShuffled {
-            toggleShuffle()
-            isLooping = true
-        } else if isLooping {
-            isLooping = false
+        if next, let current, let original = order.firstIndex(of: current.id) {
+            order.insert(entry.id, at: original + 1)
         } else {
-            toggleShuffle()
+            order.append(entry.id)
         }
     }
     public mutating func toggleShuffle() {
         isShuffled.toggle()
         guard current != nil else { return }
         var tail = upcoming
-        if isShuffled { tail.shuffle() }
-        else {
+        if isShuffled {
+            tail.shuffle()
+        } else {
             let positions = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($0.element, $0.offset) })
             tail.sort { positions[$0.id, default: 0] < positions[$1.id, default: 0] }
         }
@@ -86,8 +98,6 @@ public struct PlaybackQueue {
         items = Array(items.prefix(currentIndex + 1))
         let remaining = Set(items.map(\.id))
         order.removeAll { !remaining.contains($0) }
-        // Clear All means playback ends after this song, even in loop mode.
-        isLooping = false
     }
     public mutating func moveUpcoming(_ entryIDs: [UUID], before destination: UUID?) {
         let ids = Set(entryIDs)
@@ -98,7 +108,9 @@ public struct PlaybackQueue {
         if let destination {
             guard let target = tail.firstIndex(where: { $0.id == destination }) else { return }
             index = target
-        } else { index = tail.count }
+        } else {
+            index = tail.count
+        }
         tail.insert(contentsOf: moving, at: index)
         items = Array(items.prefix(currentIndex + 1)) + tail
         // A manual order becomes the baseline when shuffle is switched off.

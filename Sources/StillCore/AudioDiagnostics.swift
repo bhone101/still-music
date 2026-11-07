@@ -30,23 +30,29 @@ import Foundation
         self.capacity = max(1, min(capacity, 256))
         // Reject oversized/corrupt logs; diagnostics must never prevent playback.
         if let storageURL,
-           let size = try? storageURL.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 131072,
-           let data = try? Data(contentsOf: storageURL),
-           let report = try? JSONDecoder().decode(Report.self, from: data), report.schemaVersion == 1 {
+            let size = try? storageURL.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 131072,
+            let data = try? Data(contentsOf: storageURL),
+            let report = try? JSONDecoder().decode(Report.self, from: data), report.schemaVersion == 1
+        {
             entries = Array(report.entries.suffix(self.capacity))
         }
     }
 
-    public func record(_ event: Event, device: UInt32? = nil, sourceRate: Double? = nil,
-                       outputRate: Double? = nil, status: Int? = nil) {
-        entries.append(Entry(time: Date(), event: event, device: device,
-                             sourceRate: sourceRate.flatMap { $0.isFinite ? $0 : nil },
-                             outputRate: outputRate.flatMap { $0.isFinite ? $0 : nil }, status: status))
+    public func record(
+        _ event: Event, device: UInt32? = nil, sourceRate: Double? = nil,
+        outputRate: Double? = nil, status: Int? = nil
+    ) {
+        entries.append(
+            Entry(
+                time: Date(), event: event, device: device,
+                sourceRate: sourceRate.flatMap { $0.isFinite ? $0 : nil },
+                outputRate: outputRate.flatMap { $0.isFinite ? $0 : nil }, status: status))
         if entries.count > capacity { entries.removeFirst(entries.count - capacity) }
         guard let storageURL, let data = try? exportData() else { return }
         // Serial atomic writes keep snapshots ordered and disk I/O off the audio/UI threads.
         writer.async {
-            try? FileManager.default.createDirectory(at: storageURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? FileManager.default.createDirectory(
+                at: storageURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? data.write(to: storageURL, options: .atomic)
         }
     }
